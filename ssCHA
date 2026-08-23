@@ -1,0 +1,2096 @@
+--==================================================
+-- CHAOS NIGHT SKY
+-- Aim Follow / Aim Lock / Trigger Bot / ESP
+-- Roblox Studio - LocalScript
+-- StarterPlayer > StarterPlayerScripts
+--==================================================
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local ContextActionService = game:GetService("ContextActionService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	Camera = Workspace.CurrentCamera
+end)
+
+--==================================================
+-- IMAGE
+--==================================================
+
+local CHARACTER_IMAGE_ID = "rbxassetid://YOUR_IMAGE_ID"
+
+--==================================================
+-- SETTINGS
+--==================================================
+
+local Settings = {
+
+	Enabled = true,
+
+	-- AIM
+	AimbotEnabled = true,
+	AimFollowEnabled = true,
+	AimLockEnabled = false,
+
+	AimPower = 0.72,
+	AimDistance = 320,
+	AimFOV = 20,
+	AimSpeed = 0.12,
+
+	RequireLineOfSight = true,
+
+	-- BODY
+	RotateCharacter = true,
+	BodyRotationSpeed = 18,
+
+	-- WEAPON
+	WeaponAimEnabled = true,
+
+	-- TRIGGER BOT
+	TriggerBotEnabled = false,
+	TriggerRadius = 22,
+	TriggerCooldown = 0.08,
+
+	-- ESP
+	ESPEnabled = true,
+	ESPBox = true,
+	ESPFilled = false,
+	ESPThroughWalls = true,
+	ESPDistance = true,
+
+	ESPMaxDistance = 420,
+
+	ESPColor = Color3.fromRGB(
+		140,
+		180,
+		255
+	),
+
+	ESPThickness = 1.5,
+}
+
+--==================================================
+-- COLORS
+--==================================================
+
+local COLORS = {
+
+	BG_TOP = Color3.fromRGB(
+		4,
+		7,
+		23
+	),
+
+	BG_MID = Color3.fromRGB(
+		8,
+		8,
+		32
+	),
+
+	BG_BOTTOM = Color3.fromRGB(
+		1,
+		3,
+		12
+	),
+
+	ACCENT = Color3.fromRGB(
+		125,
+		170,
+		255
+	),
+
+	ACCENT2 = Color3.fromRGB(
+		190,
+		125,
+		255
+	),
+
+	TEXT = Color3.fromRGB(
+		240,
+		245,
+		255
+	),
+
+	SUB = Color3.fromRGB(
+		125,
+		145,
+		190
+	),
+
+	TRACK = Color3.fromRGB(
+		17,
+		23,
+		45
+	),
+
+	OFF = Color3.fromRGB(
+		34,
+		41,
+		64
+	),
+
+	STAR = Color3.fromRGB(
+		215,
+		228,
+		255
+	),
+}
+
+--==================================================
+-- TARGET SYSTEM
+--==================================================
+
+local LockedTarget = nil
+
+local function GetCharacterParts(player)
+
+	if not player
+		or player == LocalPlayer then
+
+		return nil, nil, nil
+	end
+
+	local character =
+		player.Character
+
+	if not character then
+		return nil, nil, nil
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	local head =
+		character:FindFirstChild(
+			"Head"
+		)
+
+	local root =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not humanoid
+		or not head
+		or not root then
+
+		return nil, nil, nil
+	end
+
+	if humanoid.Health <= 0 then
+		return nil, nil, nil
+	end
+
+	return character, head, root
+end
+
+--==================================================
+-- LINE OF SIGHT
+--==================================================
+
+local function HasLineOfSight(
+	fromPosition,
+	targetCharacter
+)
+
+	if not Settings.RequireLineOfSight then
+		return true
+	end
+
+	if not targetCharacter then
+		return false
+	end
+
+	local head =
+		targetCharacter:FindFirstChild(
+			"Head"
+		)
+
+	if not head then
+		return false
+	end
+
+	local params =
+		RaycastParams.new()
+
+	params.FilterType =
+		Enum.RaycastFilterType.Exclude
+
+	params.FilterDescendantsInstances = {
+		LocalPlayer.Character,
+		Camera
+	}
+
+	local result =
+		Workspace:Raycast(
+			fromPosition,
+			head.Position - fromPosition,
+			params
+		)
+
+	if not result then
+		return true
+	end
+
+	return result.Instance:IsDescendantOf(
+		targetCharacter
+	)
+end
+
+--==================================================
+-- TARGET USABLE
+--==================================================
+
+local function IsTargetUsable(player)
+
+	local character, head =
+		GetCharacterParts(player)
+
+	if not character
+		or not head
+		or not Camera then
+
+		return false
+	end
+
+	local cameraPosition =
+		Camera.CFrame.Position
+
+	local distance =
+		(head.Position - cameraPosition).Magnitude
+
+	if distance >
+		Settings.AimDistance then
+
+		return false
+	end
+
+	if not HasLineOfSight(
+		cameraPosition,
+		character
+	) then
+
+		return false
+	end
+
+	return true
+end
+
+--==================================================
+-- FIND BEST TARGET
+--==================================================
+
+local function FindBestTarget()
+
+	if not Camera then
+		return nil
+	end
+
+	local cameraPosition =
+		Camera.CFrame.Position
+
+	local cameraDirection =
+		Camera.CFrame.LookVector
+
+	local bestTarget = nil
+	local bestScore = math.huge
+
+	for _, player in ipairs(
+		Players:GetPlayers()
+	) do
+
+		if player ~= LocalPlayer then
+
+			local character, head =
+				GetCharacterParts(player)
+
+			if character and head then
+
+				local offset =
+					head.Position -
+					cameraPosition
+
+				local distance =
+					offset.Magnitude
+
+				if distance <=
+					Settings.AimDistance
+					and distance > 0 then
+
+					local dot =
+						cameraDirection:Dot(
+							offset.Unit
+						)
+
+					local angle =
+						math.deg(
+							math.acos(
+								math.clamp(
+									dot,
+									-1,
+									1
+								)
+							)
+						)
+
+					if angle <=
+						Settings.AimFOV then
+
+						local visible =
+							HasLineOfSight(
+								cameraPosition,
+								character
+							)
+
+						if visible then
+
+							local score =
+								(angle * 8)
+								+
+								(distance * 0.01)
+
+							if score <
+								bestScore then
+
+								bestScore =
+									score
+
+								bestTarget =
+									player
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return bestTarget
+end
+
+--==================================================
+-- STICKY TARGET
+--==================================================
+
+local function GetStickyTarget()
+
+	if LockedTarget then
+
+		if IsTargetUsable(
+			LockedTarget
+		) then
+
+			return LockedTarget
+		end
+
+		LockedTarget = nil
+	end
+
+	if not Settings.AimbotEnabled then
+		return nil
+	end
+
+	LockedTarget =
+		FindBestTarget()
+
+	return LockedTarget
+end
+
+--==================================================
+-- SHARED AIM POINT
+--==================================================
+
+local function GetAimPoint()
+
+	local target =
+		GetStickyTarget()
+
+	if target then
+
+		local character, head =
+			GetCharacterParts(target)
+
+		if character and head then
+			return head.Position, target
+		end
+	end
+
+	if Camera then
+
+		return
+			Camera.CFrame.Position
+			+
+			Camera.CFrame.LookVector * 1000,
+			nil
+	end
+
+	return nil, nil
+end
+
+shared.ChaosGetAimPoint =
+	GetAimPoint
+
+shared.ChaosGetTarget =
+	GetStickyTarget
+
+--==================================================
+-- CHARACTER ROTATION
+--==================================================
+
+local DefaultSensitivity =
+	UserInputService.MouseDeltaSensitivity
+
+local function RestoreCharacterRotation()
+
+	local character =
+		LocalPlayer.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if humanoid then
+		humanoid.AutoRotate = true
+	end
+end
+
+local function RotateCharacterToTarget(
+	targetPosition,
+	dt
+)
+
+	if not Settings.RotateCharacter then
+		return
+	end
+
+	local character =
+		LocalPlayer.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid =
+		character:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	local root =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not humanoid
+		or not root then
+
+		return
+	end
+
+	if humanoid.Health <= 0 then
+		return
+	end
+
+	humanoid.AutoRotate = false
+
+	local rootPosition =
+		root.Position
+
+	local flatTarget =
+		Vector3.new(
+			targetPosition.X,
+			rootPosition.Y,
+			targetPosition.Z
+		)
+
+	local direction =
+		flatTarget - rootPosition
+
+	if direction.Magnitude < 0.001 then
+		return
+	end
+
+	local desiredRoot =
+		CFrame.lookAt(
+			rootPosition,
+			flatTarget
+		)
+
+	local alpha =
+		math.clamp(
+			Settings.BodyRotationSpeed * dt,
+			0,
+			1
+		)
+
+	root.CFrame =
+		root.CFrame:Lerp(
+			desiredRoot,
+			alpha
+		)
+end
+
+--==================================================
+-- EQUIPPED TOOL
+--==================================================
+
+local function GetEquippedTool()
+
+	local character =
+		LocalPlayer.Character
+
+	if not character then
+		return nil
+	end
+
+	for _, object in ipairs(
+		character:GetChildren()
+	) do
+
+		if object:IsA("Tool") then
+			return object
+		end
+	end
+
+	return nil
+end
+
+--==================================================
+-- WEAPON AIM
+--==================================================
+
+local function UpdateWeaponAim(
+	targetPosition
+)
+
+	if not Settings.WeaponAimEnabled then
+		return
+	end
+
+	local tool =
+		GetEquippedTool()
+
+	if not tool then
+		return
+	end
+
+	local handle =
+		tool:FindFirstChild(
+			"Handle"
+		)
+
+	if not handle then
+		return
+	end
+
+	-- 일반 Tool의 경우 서버가 실제 발사를
+	-- 어떻게 구현했는지에 따라 Grip을 사용.
+	--
+	-- Tool 내부에 별도의 ViewModel / Motor6D /
+	-- Weld 시스템이 있다면 해당 시스템에서
+	-- Camera 방향을 사용해야 한다.
+
+	if handle:IsA("BasePart") then
+
+		-- Tool의 Grip은 단순 보정값만 변경.
+		-- 실제 ViewModel 무기는 자체 시스템을 사용.
+		local localTarget =
+			handle.CFrame:PointToObjectSpace(
+				targetPosition
+			)
+
+		if localTarget.Magnitude > 0 then
+
+			local direction =
+				localTarget.Unit
+
+			-- 무기 자체를 직접 회전시키지 않고
+			-- Roblox Tool의 기본 방향을 유지한다.
+			-- 실제 총 방향은 Tool/ViewModel 코드에서
+			-- Camera 방향을 사용하도록 연결해야 한다.
+			_ = direction
+		end
+	end
+end
+
+--==================================================
+-- AIM LOOP
+--==================================================
+
+RunService:BindToRenderStep(
+	"ChaosAim",
+	Enum.RenderPriority.Camera.Value + 1,
+	function(dt)
+
+		if not Camera then
+			return
+		end
+
+		if not Settings.Enabled then
+
+			RestoreCharacterRotation()
+
+			UserInputService.MouseDeltaSensitivity =
+				DefaultSensitivity
+
+			return
+		end
+
+		if not Settings.AimbotEnabled then
+
+			LockedTarget = nil
+
+			RestoreCharacterRotation()
+
+			UserInputService.MouseDeltaSensitivity =
+				DefaultSensitivity
+
+			return
+		end
+
+		local target =
+			GetStickyTarget()
+
+		if not target then
+
+			RestoreCharacterRotation()
+
+			UserInputService.MouseDeltaSensitivity =
+				DefaultSensitivity
+
+			return
+		end
+
+		local character, head =
+			GetCharacterParts(target)
+
+		if not character
+			or not head then
+
+			LockedTarget = nil
+
+			RestoreCharacterRotation()
+
+			return
+		end
+
+		UserInputService.MouseDeltaSensitivity =
+			DefaultSensitivity
+			*
+			(
+				1 -
+				math.clamp(
+					Settings.AimPower * 0.5,
+					0,
+					0.5
+				)
+			)
+
+		local current =
+			Camera.CFrame
+
+		local desired =
+			CFrame.lookAt(
+				current.Position,
+				head.Position
+			)
+
+		local alpha = 0
+
+		if Settings.AimLockEnabled then
+
+			alpha =
+				math.clamp(
+					0.90
+					+
+					Settings.AimPower * 0.10,
+					0,
+					1
+				)
+
+		elseif Settings.AimFollowEnabled then
+
+			alpha =
+				math.clamp(
+					Settings.AimPower
+					*
+					Settings.AimSpeed
+					*
+					60
+					*
+					dt,
+					0,
+					0.90
+				)
+		end
+
+		if alpha > 0 then
+
+			Camera.CFrame =
+				current:Lerp(
+					desired,
+					alpha
+				)
+
+			RotateCharacterToTarget(
+				head.Position,
+				dt
+			)
+
+			UpdateWeaponAim(
+				head.Position
+			)
+
+		else
+
+			RestoreCharacterRotation()
+		end
+	end
+)
+
+--==================================================
+-- RESPAWN
+--==================================================
+
+LocalPlayer.CharacterAdded:Connect(
+	function(character)
+
+		LockedTarget = nil
+
+		local humanoid =
+			character:WaitForChild(
+				"Humanoid",
+				5
+			)
+
+		if humanoid then
+			humanoid.AutoRotate = true
+		end
+	end
+)
+
+--==================================================
+-- TRIGGER BOT
+--==================================================
+
+local LastTriggerTime = 0
+
+local function GetCrosshairTarget()
+
+	if not Camera then
+		return nil
+	end
+
+	local viewport =
+		Camera.ViewportSize
+
+	local center =
+		Vector2.new(
+			viewport.X / 2,
+			viewport.Y / 2
+		)
+
+	local ray =
+		Camera:ViewportPointToRay(
+			center.X,
+			center.Y
+		)
+
+	local params =
+		RaycastParams.new()
+
+	params.FilterType =
+		Enum.RaycastFilterType.Exclude
+
+	params.FilterDescendantsInstances = {
+		LocalPlayer.Character
+	}
+
+	local result =
+		Workspace:Raycast(
+			ray.Origin,
+			ray.Direction *
+				Settings.AimDistance,
+			params
+		)
+
+	if not result then
+		return nil
+	end
+
+	local model =
+		result.Instance:FindFirstAncestorOfClass(
+			"Model"
+		)
+
+	if not model then
+		return nil
+	end
+
+	local humanoid =
+		model:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if not humanoid
+		or humanoid.Health <= 0 then
+
+		return nil
+	end
+
+	for _, player in ipairs(
+		Players:GetPlayers()
+	) do
+
+		if player ~= LocalPlayer
+			and player.Character == model then
+
+			return player
+		end
+	end
+
+	return nil
+end
+
+local function IsCrosshairOnTarget(
+	target
+)
+
+	if not Camera
+		or not target then
+
+		return false
+	end
+
+	local character, head =
+		GetCharacterParts(target)
+
+	if not character
+		or not head then
+
+		return false
+	end
+
+	local screenPosition,
+		onScreen =
+		Camera:WorldToViewportPoint(
+			head.Position
+		)
+
+	if not onScreen
+		or screenPosition.Z <= 0 then
+
+		return false
+	end
+
+	local center =
+		Camera.ViewportSize / 2
+
+	local offset =
+		Vector2.new(
+			screenPosition.X,
+			screenPosition.Y
+		)
+		-
+		Vector2.new(
+			center.X,
+			center.Y
+		)
+
+	return offset.Magnitude <=
+		Settings.TriggerRadius
+end
+
+local function TriggerWeapon(tool)
+
+	if not tool then
+		return false
+	end
+
+	local success =
+		pcall(
+			function()
+				tool:Activate()
+			end
+		)
+
+	return success
+end
+
+RunService.RenderStepped:Connect(
+	function()
+
+		if not Settings.Enabled then
+			return
+		end
+
+		if not Settings.TriggerBotEnabled then
+			return
+		end
+
+		local tool =
+			GetEquippedTool()
+
+		if not tool then
+			return
+		end
+
+		local target =
+			GetCrosshairTarget()
+
+		if not target then
+			return
+		end
+
+		if not IsTargetUsable(
+			target
+		) then
+
+			return
+		end
+
+		if not IsCrosshairOnTarget(
+			target
+		) then
+
+			return
+		end
+
+		local now =
+			os.clock()
+
+		if now - LastTriggerTime
+			<
+			Settings.TriggerCooldown then
+
+			return
+		end
+
+		LastTriggerTime =
+			now
+
+		TriggerWeapon(
+			tool
+		)
+	end
+)
+
+--==================================================
+-- ESP
+--==================================================
+
+local ESPGui =
+	Instance.new("ScreenGui")
+
+ESPGui.Name =
+	"ChaosESP"
+
+ESPGui.ResetOnSpawn =
+	false
+
+ESPGui.IgnoreGuiInset =
+	true
+
+ESPGui.Parent =
+	LocalPlayer:WaitForChild(
+		"PlayerGui"
+	)
+
+local ESPFolder =
+	Instance.new("Folder")
+
+ESPFolder.Name =
+	"Boxes"
+
+ESPFolder.Parent =
+	ESPGui
+
+local ActiveBoxes = {}
+
+local function CreateESPBox()
+
+	local container =
+		Instance.new("Frame")
+
+	container.Name =
+		"ESPContainer"
+
+	container.BackgroundTransparency =
+		1
+
+	container.BorderSizePixel =
+		0
+
+	container.Visible =
+		false
+
+	container.Parent =
+		ESPFolder
+
+	local outline =
+		Instance.new("Frame")
+
+	outline.Name =
+		"Outline"
+
+	outline.Size =
+		UDim2.fromScale(
+			1,
+			1
+		)
+
+	outline.BackgroundTransparency =
+		1
+
+	outline.BorderSizePixel =
+		0
+
+	outline.Parent =
+		container
+
+	local stroke =
+		Instance.new("UIStroke")
+
+	stroke.Name =
+		"Stroke"
+
+	stroke.Thickness =
+		Settings.ESPThickness
+
+	stroke.Color =
+		Settings.ESPColor
+
+	stroke.Parent =
+		outline
+
+	local fill =
+		Instance.new("Frame")
+
+	fill.Name =
+		"Fill"
+
+	fill.Size =
+		UDim2.fromScale(
+			1,
+			1
+		)
+
+	fill.BackgroundColor3 =
+		Settings.ESPColor
+
+	fill.BackgroundTransparency =
+		0.82
+
+	fill.BorderSizePixel =
+		0
+
+	fill.Visible =
+		Settings.ESPFilled
+
+	fill.Parent =
+		container
+
+	local fillCorner =
+		Instance.new("UICorner")
+
+	fillCorner.CornerRadius =
+		UDim.new(
+			0,
+			3
+		)
+
+	fillCorner.Parent =
+		fill
+
+	local distance =
+		Instance.new("TextLabel")
+
+	distance.Name =
+		"Distance"
+
+	distance.Size =
+		UDim2.new(
+			1,
+			0,
+			0,
+			14
+		)
+
+	distance.Position =
+		UDim2.new(
+			0,
+			0,
+			1,
+			2
+		)
+
+	distance.BackgroundTransparency =
+		1
+
+	distance.Font =
+		Enum.Font.GothamBold
+
+	distance.TextSize =
+		11
+
+	distance.TextColor3 =
+		Settings.ESPColor
+
+	distance.Text =
+		""
+
+	distance.Parent =
+		container
+
+	return container
+end
+
+local LastESPUpdate = 0
+
+RunService.Heartbeat:Connect(
+	function()
+
+		if not Settings.ESPEnabled
+			or not Camera then
+
+			for _, data in pairs(
+				ActiveBoxes
+			) do
+
+				data.container.Visible =
+					false
+			end
+
+			return
+		end
+
+		local now =
+			os.clock()
+
+		if now - LastESPUpdate <
+			0.033 then
+
+			return
+		end
+
+		LastESPUpdate =
+			now
+
+		local cameraPosition =
+			Camera.CFrame.Position
+
+		local used = {}
+
+		for _, player in ipairs(
+			Players:GetPlayers()
+		) do
+
+			if player ~= LocalPlayer
+				and player.Character then
+
+				local character =
+					player.Character
+
+				local humanoid =
+					character:FindFirstChildOfClass(
+						"Humanoid"
+					)
+
+				local head =
+					character:FindFirstChild(
+						"Head"
+					)
+
+				local root =
+					character:FindFirstChild(
+						"HumanoidRootPart"
+					)
+					or
+					character:FindFirstChild(
+						"UpperTorso"
+					)
+					or
+					character:FindFirstChild(
+						"Torso"
+					)
+
+				if humanoid
+					and head
+					and root
+					and humanoid.Health > 0 then
+
+					local distance =
+						(
+							head.Position
+							-
+							cameraPosition
+						).Magnitude
+
+					if distance <=
+						Settings.ESPMaxDistance then
+
+						local visible =
+							Settings.ESPThroughWalls
+							or
+							HasLineOfSight(
+								cameraPosition,
+								character
+							)
+
+						if visible then
+
+							local headPosition,
+								headVisible =
+								Camera:WorldToViewportPoint(
+									head.Position
+									+
+									Vector3.new(
+										0,
+										0.3,
+										0
+									)
+								)
+
+							local footPosition =
+								Camera:WorldToViewportPoint(
+									root.Position
+									-
+									Vector3.new(
+										0,
+										3,
+										0
+									)
+								)
+
+							if headVisible
+								and headPosition.Z > 0 then
+
+								local height =
+									math.abs(
+										headPosition.Y
+										-
+										footPosition.Y
+									)
+
+								local width =
+									height * 0.55
+
+								local data =
+									ActiveBoxes[player]
+
+								if not data then
+
+									data = {
+										container =
+											CreateESPBox()
+									}
+
+									ActiveBoxes[player] =
+										data
+								end
+
+								local container =
+									data.container
+
+								container.Size =
+									UDim2.fromOffset(
+										width,
+										height
+									)
+
+								container.Position =
+									UDim2.fromOffset(
+										headPosition.X
+										-
+										width / 2,
+										headPosition.Y
+									)
+
+								container.Visible =
+									Settings.ESPBox
+
+								local outline =
+									container:FindFirstChild(
+										"Outline"
+									)
+
+								local fill =
+									container:FindFirstChild(
+										"Fill"
+									)
+
+								local distanceLabel =
+									container:FindFirstChild(
+										"Distance"
+									)
+
+								if outline then
+
+									local stroke =
+										outline:FindFirstChild(
+											"Stroke"
+										)
+
+									if stroke then
+
+										stroke.Color =
+											Settings.ESPColor
+
+										stroke.Thickness =
+											Settings.ESPThickness
+									end
+								end
+
+								if fill then
+
+									fill.BackgroundColor3 =
+										Settings.ESPColor
+
+									fill.Visible =
+										Settings.ESPFilled
+								end
+
+								if distanceLabel then
+
+									if Settings.ESPDistance then
+
+										distanceLabel.Text =
+											math.floor(
+												distance
+											)
+											..
+											"m"
+
+									else
+
+										distanceLabel.Text =
+											""
+									end
+
+									distanceLabel.TextColor3 =
+										Settings.ESPColor
+								end
+
+								used[player] =
+									true
+							end
+						end
+					end
+				end
+			end
+		end
+
+		for player, data in pairs(
+			ActiveBoxes
+		) do
+
+			if not used[player] then
+
+				data.container.Visible =
+					false
+			end
+		end
+	end
+)
+
+
+--==================================================
+-- MAIN UI
+--==================================================
+
+local Gui = Instance.new("ScreenGui")
+
+Gui.Name = "ChaosUI"
+
+Gui.ResetOnSpawn = false
+
+Gui.IgnoreGuiInset = true
+
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+Gui.DisplayOrder = 9999
+
+Gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+--==================================================
+-- THEME  (photo: near-black + neon blue)
+--==================================================
+
+local THEME = {
+
+	BG = Color3.fromRGB(14, 14, 14),
+
+	BG_DARK = Color3.fromRGB(9, 9, 9),
+
+	ACCENT = Color3.fromRGB(0, 150, 255),
+
+	TEXT = Color3.fromRGB(232, 232, 232),
+
+	SUB = Color3.fromRGB(122, 122, 122),
+
+	OFF = Color3.fromRGB(34, 34, 34),
+
+	LINE = Color3.fromRGB(28, 28, 28),
+}
+
+local FONT = Enum.Font.Code
+
+--==================================================
+-- PANEL
+--==================================================
+
+local Panel = Instance.new("Frame")
+
+Panel.Name = "Panel"
+
+Panel.Size = UDim2.fromOffset(360, 380)
+
+Panel.Position = UDim2.new(0.04, 0, 0.10, 0)
+
+Panel.BackgroundColor3 = THEME.BG
+
+Panel.BorderSizePixel = 0
+
+Panel.ClipsDescendants = true
+
+Panel.Active = true
+
+Panel.Parent = Gui
+
+local Border = Instance.new("UIStroke")
+
+Border.Thickness = 1
+
+Border.Color = THEME.LINE
+
+Border.Parent = Panel
+
+local TopLine = Instance.new("Frame")
+
+TopLine.Size = UDim2.new(1, 0, 0, 2)
+
+TopLine.BackgroundColor3 = THEME.ACCENT
+
+TopLine.BorderSizePixel = 0
+
+TopLine.ZIndex = 2
+
+TopLine.Parent = Panel
+
+--==================================================
+-- TITLE BAR
+--==================================================
+
+local TitleBar = Instance.new("Frame")
+
+TitleBar.Size = UDim2.new(1, 0, 0, 28)
+
+TitleBar.BackgroundColor3 = THEME.BG_DARK
+
+TitleBar.BorderSizePixel = 0
+
+TitleBar.Parent = Panel
+
+local Title = Instance.new("TextLabel")
+
+Title.Size = UDim2.new(1, -20, 1, 0)
+
+Title.Position = UDim2.fromOffset(10, 0)
+
+Title.BackgroundTransparency = 1
+
+Title.Text = "CHAOS NIGHT SKY"
+
+Title.TextColor3 = THEME.TEXT
+
+Title.Font = FONT
+
+Title.TextSize = 12
+
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+Title.TextYAlignment = Enum.TextYAlignment.Center
+
+Title.Parent = TitleBar
+
+local StatusDot = Instance.new("Frame")
+
+StatusDot.Size = UDim2.fromOffset(7, 7)
+
+StatusDot.AnchorPoint = Vector2.new(1, 0.5)
+
+StatusDot.Position = UDim2.new(1, -10, 0.5, 0)
+
+StatusDot.BackgroundColor3 = THEME.ACCENT
+
+StatusDot.BorderSizePixel = 0
+
+StatusDot.Parent = TitleBar
+
+local DotCorner = Instance.new("UICorner")
+
+DotCorner.CornerRadius = UDim.new(1, 0)
+
+DotCorner.Parent = StatusDot
+
+--==================================================
+-- TAB BAR
+--==================================================
+
+local TabBar = Instance.new("Frame")
+
+TabBar.Size = UDim2.new(1, 0, 0, 26)
+
+TabBar.Position = UDim2.fromOffset(0, 28)
+
+TabBar.BackgroundColor3 = THEME.BG_DARK
+
+TabBar.BorderSizePixel = 0
+
+TabBar.Parent = Panel
+
+local TabList = Instance.new("UIListLayout")
+
+TabList.FillDirection = Enum.FillDirection.Horizontal
+
+TabList.Padding = UDim.new(0, 4)
+
+TabList.VerticalAlignment = Enum.VerticalAlignment.Center
+
+TabList.Parent = TabBar
+
+local TabSep = Instance.new("Frame")
+
+TabSep.Size = UDim2.new(1, 0, 0, 1)
+
+TabSep.Position = UDim2.fromOffset(0, 54)
+
+TabSep.BackgroundColor3 = THEME.LINE
+
+TabSep.BorderSizePixel = 0
+
+TabSep.Parent = Panel
+
+--==================================================
+-- CONTENT
+--==================================================
+
+local Content = Instance.new("Frame")
+
+Content.Size = UDim2.new(1, -16, 1, -54 - 22)
+
+Content.Position = UDim2.fromOffset(8, 55)
+
+Content.BackgroundTransparency = 1
+
+Content.Parent = Panel
+
+--==================================================
+-- FOOTER
+--==================================================
+
+local Footer = Instance.new("TextLabel")
+
+Footer.Size = UDim2.new(1, 0, 0, 22)
+
+Footer.Position = UDim2.new(0, 0, 1, -22)
+
+Footer.BackgroundColor3 = THEME.BG_DARK
+
+Footer.Text = "RightShift  -  Toggle UI"
+
+Footer.TextColor3 = THEME.SUB
+
+Footer.Font = FONT
+
+Footer.TextSize = 11
+
+Footer.TextXAlignment = Enum.TextXAlignment.Center
+
+Footer.TextYAlignment = Enum.TextYAlignment.Center
+
+Footer.Parent = Panel
+
+local FooterSep = Instance.new("Frame")
+
+FooterSep.Size = UDim2.new(1, 0, 0, 1)
+
+FooterSep.Position = UDim2.fromOffset(0, -1)
+
+FooterSep.BackgroundColor3 = THEME.LINE
+
+FooterSep.BorderSizePixel = 0
+
+FooterSep.Parent = Footer
+
+--==================================================
+-- TAB SYSTEM
+--==================================================
+
+local Tabs = {}
+
+local ActivePage = nil
+
+local function SetActiveTab(tab)
+
+	for _, t in ipairs(Tabs) do
+
+		t.underline.Visible = (t == tab)
+
+		t.button.TextColor3 = (t == tab) and THEME.ACCENT or THEME.SUB
+	end
+
+	if ActivePage then
+		ActivePage.Visible = false
+	end
+
+	ActivePage = tab.page
+
+	ActivePage.Visible = true
+end
+
+local function CreateTab(name)
+
+	local button = Instance.new("TextButton")
+
+	button.AutomaticSize = Enum.AutomaticSize.X
+
+	button.Size = UDim2.fromOffset(0, 26)
+
+	button.BackgroundTransparency = 1
+
+	button.Text = "  " .. name .. "  "
+
+	button.TextColor3 = THEME.SUB
+
+	button.Font = FONT
+
+	button.TextSize = 12
+
+	button.AutoButtonColor = false
+
+	button.Parent = TabBar
+
+	local underline = Instance.new("Frame")
+
+	underline.Size = UDim2.new(1, -8, 0, 2)
+
+	underline.AnchorPoint = Vector2.new(0.5, 1)
+
+	underline.Position = UDim2.new(0.5, 0, 1, 0)
+
+	underline.BackgroundColor3 = THEME.ACCENT
+
+	underline.BorderSizePixel = 0
+
+	underline.Visible = false
+
+	underline.Parent = button
+
+	local page = Instance.new("Frame")
+
+	page.Size = UDim2.fromScale(1, 1)
+
+	page.BackgroundTransparency = 1
+
+	page.Visible = false
+
+	page.Parent = Content
+
+	local layout = Instance.new("UIListLayout")
+
+	layout.Padding = UDim.new(0, 1)
+
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	layout.Parent = page
+
+	local tab = {
+		button = button,
+		underline = underline,
+		page = page,
+	}
+
+	table.insert(Tabs, tab)
+
+	button.MouseButton1Click:Connect(function()
+
+		SetActiveTab(tab)
+	end)
+
+	return tab
+end
+
+--==================================================
+-- CHECKBOX
+--==================================================
+
+local Order = 0
+
+local function CreateCheckbox(parent, text, default, callback)
+
+	Order = Order + 1
+
+	local button = Instance.new("TextButton")
+
+	button.Size = UDim2.new(1, 0, 0, 20)
+
+	button.LayoutOrder = Order
+
+	button.BackgroundTransparency = 1
+
+	button.Text = ""
+
+	button.AutoButtonColor = false
+
+	button.Parent = parent
+
+	local box = Instance.new("Frame")
+
+	box.Size = UDim2.fromOffset(14, 14)
+
+	box.Position = UDim2.fromOffset(2, 3)
+
+	box.BackgroundColor3 = default and THEME.ACCENT or THEME.OFF
+
+	box.BorderSizePixel = 0
+
+	box.Parent = button
+
+	local check = Instance.new("TextLabel")
+
+	check.Size = UDim2.fromScale(1, 1)
+
+	check.BackgroundTransparency = 1
+
+	check.Text = default and "✓" or ""
+
+	check.TextColor3 = THEME.BG_DARK
+
+	check.Font = FONT
+
+	check.TextSize = 12
+
+	check.Parent = box
+
+	local label = Instance.new("TextLabel")
+
+	label.Position = UDim2.fromOffset(22, 0)
+
+	label.Size = UDim2.new(1, -22, 1, 0)
+
+	label.BackgroundTransparency = 1
+
+	label.Text = text
+
+	label.TextColor3 = THEME.TEXT
+
+	label.Font = FONT
+
+	label.TextSize = 12
+
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	label.TextYAlignment = Enum.TextYAlignment.Center
+
+	label.Parent = button
+
+	local state = default
+
+	button.MouseButton1Click:Connect(function()
+
+		state = not state
+
+		check.Text = state and "✓" or ""
+
+		TweenService:Create(
+			box,
+			TweenInfo.new(0.10),
+			{
+				BackgroundColor3 = state and THEME.ACCENT or THEME.OFF
+			}
+		):Play()
+
+		callback(state)
+	end)
+
+	return button
+end
+
+--==================================================
+-- AIMBOT TAB
+--==================================================
+
+local AimbotTab = CreateTab("Aimbot")
+
+CreateCheckbox(
+	AimbotTab.page,
+	"Aimbot",
+	Settings.AimbotEnabled,
+	function(v)
+
+		Settings.AimbotEnabled = v
+
+		if not v then
+
+			LockedTarget = nil
+
+			RestoreCharacterRotation()
+		end
+	end
+)
+
+CreateCheckbox(
+	AimbotTab.page,
+	"Aim Follow",
+	Settings.AimFollowEnabled,
+	function(v)
+
+		Settings.AimFollowEnabled = v
+
+		if v then
+			Settings.AimLockEnabled = false
+		end
+	end
+)
+
+CreateCheckbox(
+	AimbotTab.page,
+	"Aim Lock",
+	Settings.AimLockEnabled,
+	function(v)
+
+		Settings.AimLockEnabled = v
+
+		if v then
+			Settings.AimFollowEnabled = false
+		end
+	end
+)
+
+CreateCheckbox(
+	AimbotTab.page,
+	"Body Rotation",
+	Settings.RotateCharacter,
+	function(v)
+
+		Settings.RotateCharacter = v
+
+		if not v then
+			RestoreCharacterRotation()
+		end
+	end
+)
+
+CreateCheckbox(
+	AimbotTab.page,
+	"Weapon Aim",
+	Settings.WeaponAimEnabled,
+	function(v)
+
+		Settings.WeaponAimEnabled = v
+	end
+)
+
+--==================================================
+-- TRIGGER BOT TAB
+--==================================================
+
+local TriggerTab = CreateTab("Trigger Bot")
+
+CreateCheckbox(
+	TriggerTab.page,
+	"Trigger Bot",
+	Settings.TriggerBotEnabled,
+	function(v)
+
+		Settings.TriggerBotEnabled = v
+	end
+)
+
+--==================================================
+-- VISUAL TAB  (ESP)
+--==================================================
+
+local VisualTab = CreateTab("Visual")
+
+CreateCheckbox(
+	VisualTab.page,
+	"ESP",
+	Settings.ESPEnabled,
+	function(v)
+
+		Settings.ESPEnabled = v
+	end
+)
+
+CreateCheckbox(
+	VisualTab.page,
+	"ESP Box",
+	Settings.ESPBox,
+	function(v)
+
+		Settings.ESPBox = v
+	end
+)
+
+CreateCheckbox(
+	VisualTab.page,
+	"ESP Fill",
+	Settings.ESPFilled,
+	function(v)
+
+		Settings.ESPFilled = v
+	end
+)
+
+CreateCheckbox(
+	VisualTab.page,
+	"Through Walls",
+	Settings.ESPThroughWalls,
+	function(v)
+
+		Settings.ESPThroughWalls = v
+	end
+)
+
+CreateCheckbox(
+	VisualTab.page,
+	"Distance",
+	Settings.ESPDistance,
+	function(v)
+
+		Settings.ESPDistance = v
+	end
+)
+
+-- default tab
+SetActiveTab(AimbotTab)
+
+--==================================================
+-- DRAG
+--==================================================
+
+local draggingPanel = false
+
+local dragStart = nil
+
+local startPosition = nil
+
+Panel.InputBegan:Connect(
+	function(input)
+
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			draggingPanel = true
+
+			dragStart = input.Position
+
+			startPosition = Panel.Position
+
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+
+			UserInputService.MouseIconEnabled = true
+		end
+	end
+)
+
+UserInputService.InputChanged:Connect(
+	function(input)
+
+		if draggingPanel
+			and (
+				input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch
+			) then
+
+			local delta = input.Position - dragStart
+
+			Panel.Position = UDim2.new(
+				startPosition.X.Scale,
+				startPosition.X.Offset + delta.X,
+
+				startPosition.Y.Scale,
+				startPosition.Y.Offset + delta.Y
+			)
+		end
+	end
+)
+
+UserInputService.InputEnded:Connect(
+	function(input)
+
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			draggingPanel = false
+		end
+	end
+)
+
+--==================================================
+-- TOGGLE UI
+--==================================================
+
+local function SetVisible(visible)
+
+	Panel.Visible = visible
+
+	if visible then
+
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+
+		UserInputService.MouseIconEnabled = true
+	end
+end
+
+UserInputService.InputBegan:Connect(
+	function(input, gameProcessed)
+
+		if gameProcessed then
+			return
+		end
+
+		if input.KeyCode == Enum.KeyCode.RightShift then
+
+			SetVisible(not Panel.Visible)
+		end
+	end
+)
+
+ContextActionService:BindActionAtPriority(
+	"ChaosToggle",
+	function(_, state)
+
+		if state == Enum.UserInputState.Begin then
+
+			SetVisible(not Panel.Visible)
+		end
+
+		return Enum.ContextActionResult.Sink
+	end,
+	false,
+	Enum.ContextActionPriority.High.Value,
+	Enum.KeyCode.Escape
+)
+
+--==================================================
+-- INITIAL STATE
+--==================================================
+
+Panel.Visible = true
+
+print("[CHAOS] Night Sky system loaded.")
