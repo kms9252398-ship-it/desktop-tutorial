@@ -61,11 +61,95 @@ local Settings = {
 }
 
 --==================================================
+-- AUTO SETTINGS SAVE / LOAD
+-- 기존 Settings 아래에 그대로 추가
+--==================================================
+
+local HttpService = game:GetService("HttpService")
+local SETTINGS_FILE = "ChaosRivalSettings.json"
+
+local function SaveChaosSettings()
+
+	pcall(function()
+
+		local data = {}
+
+		for key, value in pairs(Settings) do
+			if type(value) == "boolean"
+				or type(value) == "number"
+				or type(value) == "string" then
+
+				data[key] = value
+			end
+		end
+
+		writefile(
+			SETTINGS_FILE,
+			HttpService:JSONEncode(data)
+		)
+
+	end)
+
+end
+
+local function LoadChaosSettings()
+
+	pcall(function()
+
+		if not isfile(SETTINGS_FILE) then
+			return
+		end
+
+		local data =
+			HttpService:JSONDecode(
+				readfile(SETTINGS_FILE)
+			)
+
+		if type(data) ~= "table" then
+			return
+		end
+
+		for key, value in pairs(data) do
+
+			if Settings[key] ~= nil
+				and (
+					type(value) == "boolean"
+					or type(value) == "number"
+					or type(value) == "string"
+				) then
+
+				Settings[key] = value
+			end
+
+		end
+
+	end)
+
+end
+
+-- 기존 설정 불러오기
+LoadChaosSettings()
+
+-- 1초마다 저장
+task.spawn(function()
+
+	while true do
+
+		task.wait(1)
+
+		SaveChaosSettings()
+
+	end
+
+end)
+
+--==================================================
 -- CONNECTION MANAGER
 --==================================================
 
 local FeatureConnections = {
 	Aimbot = {},
+	SilentAim = {},
 	TriggerBot = {},
 	AntiAntiCheat = {}
 }
@@ -3072,6 +3156,134 @@ local AntiAntiCheatTab =
 	CreateTab("ANTI-ANTICHEAT")
 
 --==================================================
+-- CONNECTION MANAGER
+--==================================================
+
+local FeatureConnections = {
+	Aimbot = {},
+	SilentAim = {},
+	TriggerBot = {},
+	AntiAntiCheat = {}
+}
+
+local function DisconnectFeature(name)
+	local list = FeatureConnections[name]
+
+	if not list then
+		return
+	end
+
+	for _, connection in ipairs(list) do
+		if connection then
+			connection:Disconnect()
+		end
+	end
+
+	table.clear(list)
+end
+
+--==================================================
+-- SILENT AIM SLOT
+--==================================================
+
+local function Feature_SilentAim(enabled)
+
+	DisconnectFeature("SilentAim")
+
+	if not enabled then
+		return
+	end
+
+	--================================================
+	-- SILENT AIM SCRIPT SLOT
+	--================================================
+	-- 네 게임의 정상적인 Aim Assist 로직을 여기에 연결
+	-- 예:
+	--
+	-- AddFeatureConnection(
+	--     "SilentAim",
+	--     RunService.RenderStepped:Connect(function()
+	--         -- 네 로직
+	--     end)
+	-- )
+	--================================================
+getgenv().Config = {
+    HitPart = "Head",
+    FOVRadius = 300,
+    ShowFOV = true
+}
+
+local phem1_plrs = game:GetService("Players")
+local phem2_cs = game:GetService("CollectionService")
+local phem5 = game:GetService("ReplicatedStorage")
+local phem6 = phem1_plrs.LocalPlayer
+local phem7 = require(phem5.Modules.Utility)
+local phem8 = phem7.Raycast
+
+local phem4 = Drawing.new("Circle")
+phem4.Visible = getgenv().Config.ShowFOV
+phem4.Radius = getgenv().Config.FOVRadius
+phem4.Color = Color3.fromRGB(255, 255, 255)
+phem4.Thickness = 1
+phem4.Filled = false
+
+game:GetService("RunService").RenderStepped:Connect(function()
+    phem4.Position = workspace.CurrentCamera.ViewportSize / 2
+    phem4.Radius = getgenv().Config.FOVRadius
+    phem4.Visible = getgenv().Config.ShowFOV
+end)
+
+local function phem9()
+    local phem10 = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
+    local phem11 = nil
+    local phem12 = getgenv().Config.FOVRadius
+    for phem13, phem14 in phem2_cs:GetTagged("Entity") do
+        if phem14 == phem6.Character then 
+            continue 
+        end
+        local phem15 = phem14:FindFirstChild(getgenv().Config.HitPart, true)
+        if not phem15 or not phem15:IsA("BasePart") then 
+            continue 
+        end
+        local phem16, phem17 = workspace.CurrentCamera:WorldToViewportPoint(phem15.Position)
+        if not phem17 then 
+            continue 
+        end
+        local phem18 = (phem10 - Vector2.new(phem16.X, phem16.Y)).Magnitude
+        if phem18 < phem12 then
+            phem12 = phem18
+            phem11 = phem15
+        end
+    end
+    return phem11
+end
+
+phem7.Raycast = function(self, phem19, phem20, phem21, phem22, phem23, phem24)
+    if type(phem21) ~= "number" or phem21 < 100 then
+        return phem8(self, phem19, phem20, phem21, phem22, phem23, phem24)
+    end
+    local phem25 = phem9()
+    if not phem25 then
+        return phem8(self, phem19, phem20, phem21, phem22, phem23, phem24)
+    end
+    local phem26 = phem25.Position
+    local phem27 = (phem26 - phem19).Unit
+    local phem28 = (phem26 - phem19).Magnitude
+    if phem28 > phem21 then
+        phem28 = phem21
+        phem26 = phem19 + (phem27 * phem21)
+    end
+    return {
+        Position = phem26,
+        Distance = phem28,
+        Instance = phem25,
+        Material = phem25.Material,
+        Normal = -phem27
+    }
+end
+end
+
+--==================================================
 -- AIMBOT UI
 --==================================================
 
@@ -3081,17 +3293,13 @@ CreateFeatureCard(
 	Settings.AimbotEnabled,
 	function(value)
 
-		Settings.AimbotEnabled =
-			value
+		Settings.AimbotEnabled = value
 
 		if not value then
-			LockedTarget =
-				nil
+			LockedTarget = nil
 		end
 
-		Feature_Aimbot(
-			value
-		)
+		Feature_Aimbot(value)
 	end
 )
 
@@ -3101,12 +3309,10 @@ CreateFeatureCard(
 	Settings.AimFollowEnabled,
 	function(value)
 
-		Settings.AimFollowEnabled =
-			value
+		Settings.AimFollowEnabled = value
 
 		if value then
-			Settings.AimLockEnabled =
-				false
+			Settings.AimLockEnabled = false
 		end
 	end
 )
@@ -3117,13 +3323,22 @@ CreateFeatureCard(
 	Settings.AimLockEnabled,
 	function(value)
 
-		Settings.AimLockEnabled =
-			value
+		Settings.AimLockEnabled = value
 
 		if value then
-			Settings.AimFollowEnabled =
-				false
+			Settings.AimFollowEnabled = false
 		end
+	end
+)
+
+CreateFeatureCard(
+	AimbotTab.Page,
+	"Silent Aim",
+	false,
+	function(value)
+
+		Feature_SilentAim(value)
+
 	end
 )
 
@@ -3133,8 +3348,7 @@ CreateFeatureCard(
 	Settings.BodyRotationEnabled,
 	function(value)
 
-		Settings.BodyRotationEnabled =
-			value
+		Settings.BodyRotationEnabled = value
 	end
 )
 
@@ -3144,11 +3358,8 @@ CreateFeatureCard(
 	Settings.TeamCheck,
 	function(value)
 
-		Settings.TeamCheck =
-			value
-
-		LockedTarget =
-			nil
+		Settings.TeamCheck = value
+		LockedTarget = nil
 	end
 )
 
@@ -3158,12 +3369,15 @@ CreateFeatureCard(
 	Settings.RequireLineOfSight,
 	function(value)
 
-		Settings.RequireLineOfSight =
-			value
-
-		LockedTarget =
-			nil
+		Settings.RequireLineOfSight = value
+		LockedTarget = nil
 	end
+)
+
+CreateInfoCard(
+	AimbotTab.Page,
+	"Silent Aim\n"
+	.. "Custom implementation slot."
 )
 
 CreateSlider(
@@ -3174,11 +3388,8 @@ CreateSlider(
 	Settings.AimFOV,
 	function(value)
 
-		Settings.AimFOV =
-			value
-
-		LockedTarget =
-			nil
+		Settings.AimFOV = value
+		LockedTarget = nil
 	end
 )
 
@@ -3190,11 +3401,8 @@ CreateSlider(
 	Settings.AimDistance,
 	function(value)
 
-		Settings.AimDistance =
-			value
-
-		LockedTarget =
-			nil
+		Settings.AimDistance = value
+		LockedTarget = nil
 	end
 )
 
@@ -3206,8 +3414,7 @@ CreateSlider(
 	Settings.AimSmoothness * 100,
 	function(value)
 
-		Settings.AimSmoothness =
-			value / 100
+		Settings.AimSmoothness = value / 100
 	end
 )
 
