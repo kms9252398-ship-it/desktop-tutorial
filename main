@@ -3294,6 +3294,343 @@ CreateInfoCard(
 )
 
 --==================================================
+-- ESP SYSTEM
+-- Box + Side HP Bar + Name + Distance
+--==================================================
+
+local ESPObjects = {}
+
+local ESPColors = {
+	Blue = Color3.fromRGB(45,145,255),
+	Cyan = Color3.fromRGB(40,220,255),
+	Sky = Color3.fromRGB(100,190,255),
+	Purple = Color3.fromRGB(155,90,255),
+	Pink = Color3.fromRGB(255,90,190),
+	Red = Color3.fromRGB(240,65,65),
+	Orange = Color3.fromRGB(255,145,45),
+	Yellow = Color3.fromRGB(245,210,55),
+	Lime = Color3.fromRGB(150,235,70),
+	Green = Color3.fromRGB(55,220,105),
+	Mint = Color3.fromRGB(80,240,190),
+	White = Color3.fromRGB(235,240,248),
+	Gray = Color3.fromRGB(150,160,175),
+	Gold = Color3.fromRGB(255,190,70),
+	Violet = Color3.fromRGB(110,80,255)
+}
+
+local ColorNames = {
+	"Blue","Cyan","Sky","Purple","Pink",
+	"Red","Orange","Yellow","Lime","Green",
+	"Mint","White","Gray","Gold","Violet"
+}
+
+local ESPColorIndex = 1
+
+local function GetESPColor()
+	return ESPColors[ColorNames[ESPColorIndex]]
+end
+
+local function RemoveESP(player)
+	local data = ESPObjects[player]
+
+	if not data then
+		return
+	end
+
+	for _, object in pairs(data) do
+		if typeof(object) == "Instance" then
+			object:Destroy()
+		end
+	end
+
+	ESPObjects[player] = nil
+end
+
+local function CreateESP(player)
+	if player == LocalPlayer then
+		return
+	end
+
+	if ESPObjects[player] then
+		return ESPObjects[player]
+	end
+
+	local box = Instance.new("Frame")
+	box.Name = "ESPBox"
+	box.BackgroundTransparency = 1
+	box.BorderSizePixel = 0
+	box.Visible = false
+	box.ZIndex = 20
+	box.Parent = Gui
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Color = GetESPColor()
+	stroke.Parent = box
+
+	local name = Instance.new("TextLabel")
+	name.Name = "ESPName"
+	name.BackgroundTransparency = 1
+	name.TextColor3 = GetESPColor()
+	name.TextStrokeTransparency = 0.25
+	name.Font = Enum.Font.Code
+	name.TextSize = 14
+	name.AnchorPoint = Vector2.new(0.5,1)
+	name.Visible = false
+	name.ZIndex = 21
+	name.Parent = Gui
+
+	local distance = Instance.new("TextLabel")
+	distance.Name = "ESPDistance"
+	distance.BackgroundTransparency = 1
+	distance.TextColor3 = Color3.fromRGB(220,225,235)
+	distance.TextStrokeTransparency = 0.25
+	distance.Font = Enum.Font.Code
+	distance.TextSize = 11
+	distance.AnchorPoint = Vector2.new(0.5,0)
+	distance.Visible = false
+	distance.ZIndex = 21
+	distance.Parent = Gui
+
+	local healthBG = Instance.new("Frame")
+	healthBG.Name = "HealthBG"
+	healthBG.BackgroundColor3 = Color3.fromRGB(12,14,18)
+	healthBG.BorderSizePixel = 0
+	healthBG.Visible = false
+	healthBG.ZIndex = 21
+	healthBG.Parent = Gui
+
+	local healthFill = Instance.new("Frame")
+	healthFill.Name = "HealthFill"
+	healthFill.BackgroundColor3 = Color3.fromRGB(55,220,105)
+	healthFill.BorderSizePixel = 0
+	healthFill.ZIndex = 22
+	healthFill.Parent = healthBG
+
+	ESPObjects[player] = {
+		Box = box,
+		Stroke = stroke,
+		Name = name,
+		Distance = distance,
+		HealthBG = healthBG,
+		HealthFill = healthFill
+	}
+
+	return ESPObjects[player]
+end
+
+local function GetScreenBounds(character)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local head = character:FindFirstChild("Head")
+
+	if not root or not head or not Camera then
+		return nil
+	end
+
+	local top = Camera:WorldToViewportPoint(
+		head.Position + Vector3.new(0,0.35,0)
+	)
+
+	local bottom = Camera:WorldToViewportPoint(
+		root.Position - Vector3.new(0,3,0)
+	)
+
+	if top.Z <= 0 or bottom.Z <= 0 then
+		return nil
+	end
+
+	local height = math.abs(bottom.Y - top.Y)
+
+	if height < 10 then
+		return nil
+	end
+
+	local width = math.clamp(height * 0.48,18,220)
+
+	return top.X - width * 0.5, top.Y, width, height
+end
+
+local function UpdateESP()
+	Camera = Workspace.CurrentCamera
+
+	if not Camera then
+		return
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+
+			local character = player.Character
+			local humanoid =
+				character and
+				character:FindFirstChildOfClass("Humanoid")
+
+			local root =
+				character and
+				character:FindFirstChild("HumanoidRootPart")
+
+			local data = CreateESP(player)
+
+			if Settings.ESPEnabled
+				and character
+				and humanoid
+				and root
+				and humanoid.Health > 0 then
+
+				local distance3D =
+					(Camera.CFrame.Position - root.Position).Magnitude
+
+				local maxDistance =
+					Settings.ESPMaxDistance or 500
+
+				if distance3D <= maxDistance then
+
+					local x,y,width,height =
+						GetScreenBounds(character)
+
+					if x then
+
+						local color = GetESPColor()
+
+						data.Box.Visible = true
+						data.Box.Position = UDim2.fromOffset(x,y)
+						data.Box.Size =
+							UDim2.fromOffset(width,height)
+
+						data.Stroke.Color = color
+						data.Stroke.Thickness =
+							Settings.ESPBoxThickness or 2
+
+						-- NAME
+						data.Name.Visible =
+							Settings.ESPName ~= false
+
+						data.Name.Text =
+							player.DisplayName
+
+						data.Name.TextColor3 = color
+
+						data.Name.Position =
+							UDim2.fromOffset(
+								x + width * 0.5,
+								y - 4
+							)
+
+						-- DISTANCE
+						data.Distance.Visible =
+							Settings.ESPDistance ~= false
+
+						data.Distance.Text =
+							string.format(
+								"%dm",
+								math.floor(distance3D)
+							)
+
+						data.Distance.Position =
+							UDim2.fromOffset(
+								x + width * 0.5,
+								y + height + 3
+							)
+
+						-- HEALTH BAR
+						if Settings.ESPHealth then
+
+							local maxHealth =
+								math.max(
+									humanoid.MaxHealth,
+									1
+								)
+
+							local hp =
+								math.clamp(
+									humanoid.Health,
+									0,
+									maxHealth
+								)
+
+							local ratio =
+								hp / maxHealth
+
+							data.HealthBG.Visible = true
+
+							data.HealthBG.Position =
+								UDim2.fromOffset(
+									x - 8,
+									y
+								)
+
+							data.HealthBG.Size =
+								UDim2.fromOffset(
+									4,
+									height
+								)
+
+							data.HealthFill.Position =
+								UDim2.new(
+									0,0,
+									1-ratio,0
+								)
+
+							data.HealthFill.Size =
+								UDim2.new(
+									1,0,
+									ratio,0
+								)
+
+							if ratio > 0.6 then
+								data.HealthFill.BackgroundColor3 =
+									Color3.fromRGB(
+										55,220,105
+									)
+							elseif ratio > 0.3 then
+								data.HealthFill.BackgroundColor3 =
+									Color3.fromRGB(
+										245,190,55
+									)
+							else
+								data.HealthFill.BackgroundColor3 =
+									Color3.fromRGB(
+										235,65,65
+									)
+							end
+
+						else
+							data.HealthBG.Visible = false
+						end
+
+					else
+						data.Box.Visible = false
+						data.Name.Visible = false
+						data.Distance.Visible = false
+						data.HealthBG.Visible = false
+					end
+
+				else
+					data.Box.Visible = false
+					data.Name.Visible = false
+					data.Distance.Visible = false
+					data.HealthBG.Visible = false
+				end
+
+			else
+				data.Box.Visible = false
+				data.Name.Visible = false
+				data.Distance.Visible = false
+				data.HealthBG.Visible = false
+			end
+		end
+	end
+end
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+RunService.RenderStepped:Connect(UpdateESP)
+
+--==================================================
+-- VISUAL UI
+--==================================================
+
+--==================================================
 -- VISUAL UI
 --==================================================
 
@@ -3302,20 +3639,34 @@ CreateFeatureCard(
 	"ESP",
 	Settings.ESPEnabled,
 	function(value)
-
-		Settings.ESPEnabled =
-			value
+		Settings.ESPEnabled = value
 	end
 )
 
 CreateFeatureCard(
 	VisualTab.Page,
-	"Health",
+	"Health Bar",
 	Settings.ESPHealth,
 	function(value)
+		Settings.ESPHealth = value
+	end
+)
 
-		Settings.ESPHealth =
-			value
+CreateFeatureCard(
+	VisualTab.Page,
+	"Name",
+	Settings.ESPName,
+	function(value)
+		Settings.ESPName = value
+	end
+)
+
+CreateFeatureCard(
+	VisualTab.Page,
+	"Distance",
+	Settings.ESPDistance,
+	function(value)
+		Settings.ESPDistance = value
 	end
 )
 
@@ -3324,16 +3675,87 @@ CreateFeatureCard(
 	"Through Walls",
 	Settings.ESPThroughWalls,
 	function(value)
-
-		Settings.ESPThroughWalls =
-			value
+		Settings.ESPThroughWalls = value
 	end
 )
 
-CreateInfoCard(
+CreateSlider(
 	VisualTab.Page,
-	"Visual configuration area."
+	"Max Distance",
+	50,
+	2000,
+	Settings.ESPMaxDistance or 500,
+	function(value)
+		Settings.ESPMaxDistance = value
+	end
 )
+
+CreateSlider(
+	VisualTab.Page,
+	"Box Thickness",
+	1,
+	5,
+	Settings.ESPBoxThickness or 2,
+	function(value)
+		Settings.ESPBoxThickness = value
+	end
+)
+
+--==================================================
+-- ESP COLOR
+--==================================================
+
+local ColorCard = Instance.new("Frame")
+ColorCard.Size = UDim2.new(1, 0, 0, 48)
+ColorCard.BackgroundColor3 = Color3.fromRGB(9, 18, 30)
+ColorCard.BorderSizePixel = 0
+ColorCard.Parent = VisualTab.Page
+
+local ColorCorner = Instance.new("UICorner")
+ColorCorner.CornerRadius = UDim.new(0, 6)
+ColorCorner.Parent = ColorCard
+
+local ColorStroke = Instance.new("UIStroke")
+ColorStroke.Thickness = 1
+ColorStroke.Color = THEME.LINE
+ColorStroke.Parent = ColorCard
+
+local ColorButton = Instance.new("TextButton")
+ColorButton.Size = UDim2.fromScale(1, 1)
+ColorButton.BackgroundTransparency = 1
+ColorButton.Text = ""
+ColorButton.Parent = ColorCard
+
+local ColorLabel = Instance.new("TextLabel")
+ColorLabel.Size = UDim2.new(1, -170, 1, 0)
+ColorLabel.Position = UDim2.fromOffset(14, 0)
+ColorLabel.BackgroundTransparency = 1
+ColorLabel.Text = "CHANGE ESP BOX COLOR"
+ColorLabel.TextColor3 = THEME.TEXT
+ColorLabel.Font = FONT
+ColorLabel.TextSize = 14
+ColorLabel.TextXAlignment = Enum.TextXAlignment.Left
+ColorLabel.Parent = ColorButton
+
+ColorButton.MouseButton1Click:Connect(function()
+
+	ESPColorIndex += 1
+
+	if ESPColorIndex > #ColorNames then
+		ESPColorIndex = 1
+	end
+
+	-- ESP에 즉시 적용
+	for _, data in pairs(ESPObjects) do
+		if data.Stroke then
+			data.Stroke.Color = GetESPColor()
+		end
+
+		if data.Name then
+			data.Name.TextColor3 = GetESPColor()
+		end
+	end
+end)
 
 --==================================================
 -- TRIGGER UI
