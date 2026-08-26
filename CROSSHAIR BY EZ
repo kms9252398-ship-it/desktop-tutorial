@@ -1,0 +1,1794 @@
+--[[
+	CROSSHAIR CUSTOMIZER  v2
+	============================================================================
+	본인이 만든 Roblox 게임용 크로스헤어(조준선) 시스템 + 자체 UI.
+	외부 라이브러리 없음. 파일 하나로 동작합니다.
+
+	설치
+	  StarterPlayer > StarterPlayerScripts 에 LocalScript 로 추가
+
+	기본 조작
+	  RightShift : 메뉴 열기/닫기 (설정 탭에서 변경 가능)
+	  ;          : 조준선 On/Off
+
+	무기/게임 스크립트 연동
+	  _G.Crosshair:Punch(6)          -- 발사 반동
+	  _G.Crosshair:Hit(false)        -- 히트마커
+	  _G.Crosshair:Hit(true)         -- 킬마커
+	  _G.Crosshair:SetAiming(true)   -- 조준(ADS) 상태
+	  _G.Crosshair:SetVisible(false) -- 강제 숨김
+	  _G.Crosshair:Notify("텍스트")
+	  local data = _G.Crosshair:Get()   -- 저장용 테이블
+	  _G.Crosshair:Load(data)           -- 복원
+============================================================================]]
+
+--============================================================================
+-- 서비스
+--============================================================================
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+local HttpService      = game:GetService("HttpService")
+local SoundService     = game:GetService("SoundService")
+local Stats            = game:GetService("Stats")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
+
+--============================================================================
+-- 테마
+--============================================================================
+local Theme = {
+	Accent       = Color3.fromRGB(125, 95, 255),
+	Background   = Color3.fromRGB(16, 16, 18),
+	Panel        = Color3.fromRGB(24, 24, 27),
+	Panel2       = Color3.fromRGB(30, 30, 34),
+	Element      = Color3.fromRGB(38, 38, 43),
+	ElementHover = Color3.fromRGB(50, 50, 56),
+	Border       = Color3.fromRGB(56, 56, 62),
+	Black        = Color3.fromRGB(0, 0, 0),
+	Text         = Color3.fromRGB(238, 238, 242),
+	SubText      = Color3.fromRGB(148, 148, 158),
+	Font         = Enum.Font.Code,
+	TextSize     = 13,
+}
+
+local AccentObjects = {}
+local PanelObjects  = {}
+
+local function new(class, props, parent)
+	local inst = Instance.new(class)
+	for k, v in pairs(props) do inst[k] = v end
+	if parent then inst.Parent = parent end
+	return inst
+end
+
+local function accentize(inst, prop)
+	prop = prop or "BackgroundColor3"
+	inst[prop] = Theme.Accent
+	table.insert(AccentObjects, { inst, prop })
+	return inst
+end
+
+local function stroke(parent, color, thickness)
+	return new("UIStroke", {
+		Color = color or Theme.Black,
+		Thickness = thickness or 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, parent)
+end
+
+local function panelize(inst)
+	table.insert(PanelObjects, inst)
+	return inst
+end
+
+--============================================================================
+-- 설정
+--============================================================================
+local Config = {
+	Enabled       = true,
+	Shape         = "Cross",
+	Scale         = 1,
+	OffsetX       = 0,
+	OffsetY       = 0,
+
+	Length        = 8,
+	Thickness     = 2,
+	Gap           = 5,
+	Rotation      = 0,
+	ArmTop        = true,
+	ArmBottom     = true,
+	ArmLeft       = true,
+	ArmRight      = true,
+
+	Dot           = false,
+	DotSize       = 2,
+	DotRound      = true,
+	Circle        = false,
+	CircleRadius  = 14,
+	CircleThick   = 2,
+
+	Color         = Color3.fromRGB(0, 255, 140),
+	Transparency  = 0,
+	Chroma        = false,
+	ChromaSpeed   = 1,
+	Outline       = true,
+	OutlineColor  = Color3.fromRGB(0, 0, 0),
+	OutlineSize   = 1,
+
+	Pulse         = false,
+	PulseAmount   = 0.12,
+	PulseSpeed    = 3,
+	Spin          = false,
+	SpinSpeed     = 60,
+
+	Dynamic       = false,
+	MoveSpread    = 8,
+	JumpSpread    = 14,
+	CrouchSpread  = -3,
+	PunchAmount   = 6,
+	Recovery      = 12,
+
+	AdsScale      = 0.7,
+	AdsColorOn    = false,
+	AdsColor      = Color3.fromRGB(255, 60, 60),
+	AdsHide       = false,
+
+	Hitmarker     = true,
+	HitColor      = Color3.fromRGB(255, 255, 255),
+	KillColor     = Color3.fromRGB(255, 70, 70),
+	HitSize       = 10,
+	HitGap        = 4,
+	HitThick      = 2,
+	HitDuration   = 0.28,
+	HitSound      = true,
+	HitSoundId    = "rbxassetid://131961136",
+	HitVolume     = 0.5,
+
+	HideCursor    = true,
+	HideWhenDead  = true,
+	HideWhenFree  = false,
+
+	Watermark     = true,
+	UITransparency= 0,
+	Notifications = true,
+}
+
+local Presets = {
+	["Classic Cross"] = { Shape="Cross", Length=8, Thickness=2, Gap=5, Dot=false, Circle=false, Outline=true, Rotation=0, Color=Color3.fromRGB(0,255,140) },
+	["Small Dot"]     = { Shape="None", Dot=true, DotSize=3, Circle=false, Outline=true, Color=Color3.fromRGB(255,255,255) },
+	["Cross + Dot"]   = { Shape="Cross", Length=6, Thickness=2, Gap=6, Dot=true, DotSize=2, Circle=false, Outline=true, Rotation=0, Color=Color3.fromRGB(0,200,255) },
+	["T-Shape"]       = { Shape="T-Shape", Length=9, Thickness=2, Gap=5, Dot=false, Circle=false, Outline=true, Rotation=0, Color=Color3.fromRGB(255,255,255) },
+	["X Cross"]       = { Shape="Cross", Length=7, Thickness=2, Gap=4, Rotation=45, Dot=false, Circle=false, Outline=true, Color=Color3.fromRGB(255,60,60) },
+	["Ring + Dot"]    = { Shape="None", Circle=true, CircleRadius=12, CircleThick=2, Dot=true, DotSize=2, Outline=true, Color=Color3.fromRGB(255,200,0) },
+	["Brackets"]      = { Shape="Brackets", Length=8, Thickness=2, Gap=8, Dot=true, DotSize=1, Circle=false, Outline=true, Color=Color3.fromRGB(255,255,255) },
+	["Diamond"]       = { Shape="Diamond", CircleRadius=10, CircleThick=2, Dot=true, DotSize=1, Circle=false, Outline=true, Color=Color3.fromRGB(180,255,255) },
+	["Dynamic SMG"]   = { Shape="Cross", Length=5, Thickness=2, Gap=4, Dynamic=true, MoveSpread=10, JumpSpread=18, PunchAmount=7, Recovery=10, Outline=true, Color=Color3.fromRGB(0,255,140) },
+	["Sniper"]        = { Shape="Cross", Length=16, Thickness=1, Gap=3, Dot=true, DotSize=1, Circle=false, Outline=true, Rotation=0, Color=Color3.fromRGB(255,255,255) },
+	["Rainbow"]       = { Shape="Cross", Length=8, Thickness=2, Gap=5, Chroma=true, ChromaSpeed=1.5, Outline=true, Dot=true, DotSize=2 },
+}
+
+local ShapeList = { "Cross", "T-Shape", "Inverted T", "Horizontal", "Vertical", "Brackets", "Diamond", "Square", "Chevron", "None" }
+
+local ShapeArms = {
+	["Cross"]      = { true, true, true, true },
+	["T-Shape"]    = { false, true, true, true },
+	["Inverted T"] = { true, false, true, true },
+	["Horizontal"] = { false, false, true, true },
+	["Vertical"]   = { true, true, false, false },
+}
+
+local Slots = { {}, {}, {}, {} }
+
+--============================================================================
+-- 런타임 상태
+--============================================================================
+local spread, punch = 0, 0
+local chromaT, pulseT, spinAng = 0, 0, 0
+local aiming = false
+local forcedHidden = false
+
+--============================================================================
+-- 크로스헤어 GUI
+--============================================================================
+local CrosshairGui = new("ScreenGui", {
+	Name = "CrosshairGui",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 500,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, PlayerGui)
+
+local Anchor = new("Frame", {
+	Name = "Anchor",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(0, 0),
+	BackgroundTransparency = 1,
+}, CrosshairGui)
+
+local Container = new("Frame", {
+	Name = "Crosshair",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromOffset(0, 0),
+	Size = UDim2.fromOffset(0, 0),
+	BackgroundTransparency = 1,
+}, Anchor)
+local ContainerScale = new("UIScale", {}, Container)
+
+local HitLayer = new("Frame", {
+	Name = "Hitmarker",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromOffset(0, 0),
+	Size = UDim2.fromOffset(0, 0),
+	BackgroundTransparency = 1,
+}, Anchor)
+
+local HitSound = new("Sound", { Name = "HitSound", Volume = Config.HitVolume, SoundId = Config.HitSoundId }, SoundService)
+
+--============================================================================
+-- 렌더러
+--============================================================================
+local function CreateRenderer(parent)
+	local R = { parent = parent, arms = {}, mainParts = {}, outParts = {}, circles = {} }
+
+	function R:Clear()
+		for _, c in ipairs(self.parent:GetChildren()) do
+			if c:IsA("GuiObject") then c:Destroy() end
+		end
+		table.clear(self.arms); table.clear(self.mainParts)
+		table.clear(self.outParts); table.clear(self.circles)
+	end
+
+	function R:_main(inst, prop) table.insert(self.mainParts, { inst, prop or "BackgroundColor3" }) end
+	function R:_out(inst, prop)  table.insert(self.outParts,  { inst, prop or "BackgroundColor3" }) end
+
+	function R:_arm(dirX, dirY, len, thick)
+		local horizontal = (dirY == 0)
+		local w = horizontal and len or thick
+		local h = horizontal and thick or len
+
+		local outline
+		if Config.Outline then
+			outline = new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Size = UDim2.fromOffset(w + Config.OutlineSize * 2, h + Config.OutlineSize * 2),
+				BackgroundColor3 = Config.OutlineColor,
+				BorderSizePixel = 0, ZIndex = 1,
+			}, self.parent)
+			self:_out(outline)
+		end
+
+		local frame = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Size = UDim2.fromOffset(w, h),
+			BackgroundColor3 = Config.Color,
+			BorderSizePixel = 0, ZIndex = 2,
+		}, self.parent)
+		self:_main(frame)
+
+		table.insert(self.arms, { frame = frame, outline = outline, dx = dirX, dy = dirY, base = len / 2 })
+	end
+
+	function R:_ring(radius, thick, rotation, round)
+		if Config.Outline then
+			local o = new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromOffset(0, 0),
+				Size = UDim2.fromOffset(radius * 2, radius * 2),
+				BackgroundTransparency = 1,
+				Rotation = rotation or 0, ZIndex = 1,
+			}, self.parent)
+			if round then new("UICorner", { CornerRadius = UDim.new(1, 0) }, o) end
+			local os_ = new("UIStroke", { Color = Config.OutlineColor, Thickness = thick + Config.OutlineSize * 2 }, o)
+			self:_out(os_, "Color")
+			table.insert(self.circles, { frame = o, base = radius })
+		end
+		local c = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.fromOffset(radius * 2, radius * 2),
+			BackgroundTransparency = 1,
+			Rotation = rotation or 0, ZIndex = 2,
+		}, self.parent)
+		if round then new("UICorner", { CornerRadius = UDim.new(1, 0) }, c) end
+		local st = new("UIStroke", { Color = Config.Color, Thickness = thick }, c)
+		self:_main(st, "Color")
+		table.insert(self.circles, { frame = c, base = radius })
+	end
+
+	function R:_dot()
+		local d = Config.DotSize * 2
+		if Config.Outline then
+			local o = new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Size = UDim2.fromOffset(d + Config.OutlineSize * 2, d + Config.OutlineSize * 2),
+				BackgroundColor3 = Config.OutlineColor,
+				BorderSizePixel = 0, ZIndex = 3,
+			}, self.parent)
+			if Config.DotRound then new("UICorner", { CornerRadius = UDim.new(1, 0) }, o) end
+			self:_out(o)
+		end
+		local dot = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Size = UDim2.fromOffset(d, d),
+			BackgroundColor3 = Config.Color,
+			BorderSizePixel = 0, ZIndex = 4,
+		}, self.parent)
+		if Config.DotRound then new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot) end
+		self:_main(dot)
+	end
+
+	function R:_bracket()
+		local L, T, G = Config.Length, Config.Thickness, Config.Gap
+		for _, sx in ipairs({ -1, 1 }) do
+			for _, sy in ipairs({ -1, 1 }) do
+				local pieces = {
+					{ UDim2.fromOffset(sx * (G + L / 2), sy * G), L, T },
+					{ UDim2.fromOffset(sx * G, sy * (G + L / 2)), T, L },
+				}
+				for _, p in ipairs(pieces) do
+					if Config.Outline then
+						local o = new("Frame", {
+							AnchorPoint = Vector2.new(0.5, 0.5),
+							Position = p[1],
+							Size = UDim2.fromOffset(p[2] + Config.OutlineSize * 2, p[3] + Config.OutlineSize * 2),
+							BackgroundColor3 = Config.OutlineColor,
+							BorderSizePixel = 0, ZIndex = 1,
+						}, self.parent)
+						self:_out(o)
+					end
+					local f = new("Frame", {
+						AnchorPoint = Vector2.new(0.5, 0.5),
+						Position = p[1],
+						Size = UDim2.fromOffset(p[2], p[3]),
+						BackgroundColor3 = Config.Color,
+						BorderSizePixel = 0, ZIndex = 2,
+					}, self.parent)
+					self:_main(f)
+				end
+			end
+		end
+	end
+
+	function R:Build()
+		self:Clear()
+		local shape = Config.Shape
+
+		if ShapeArms[shape] then
+			local allowed = ShapeArms[shape]
+			local order = { { 0, -1 }, { 0, 1 }, { -1, 0 }, { 1, 0 } }
+			local flags = { Config.ArmTop, Config.ArmBottom, Config.ArmLeft, Config.ArmRight }
+			for i, d in ipairs(order) do
+				if allowed[i] and flags[i] then
+					self:_arm(d[1], d[2], Config.Length, Config.Thickness)
+				end
+			end
+		elseif shape == "Brackets" then
+			self:_bracket()
+		elseif shape == "Diamond" then
+			self:_ring(Config.CircleRadius, Config.CircleThick, 45, false)
+		elseif shape == "Square" then
+			self:_ring(Config.CircleRadius, Config.CircleThick, 0, false)
+		elseif shape == "Chevron" then
+			self:_arm(-1, 0, Config.Length, Config.Thickness)
+			self:_arm(1, 0, Config.Length, Config.Thickness)
+			self:_arm(0, 1, Config.Length, Config.Thickness)
+		end
+
+		if Config.Circle then self:_ring(Config.CircleRadius, Config.CircleThick, 0, true) end
+		if Config.Dot then self:_dot() end
+
+		self:ApplySpread(spread)
+		self:ApplyColor()
+	end
+
+	function R:ApplySpread(v)
+		local gap = math.max(0, Config.Gap + v)
+		for _, arm in ipairs(self.arms) do
+			local dist = gap + arm.base
+			local x, y = arm.dx * dist, arm.dy * dist
+			arm.frame.Position = UDim2.fromOffset(x, y)
+			if arm.outline then arm.outline.Position = UDim2.fromOffset(x, y) end
+		end
+		for _, c in ipairs(self.circles) do
+			local r = math.max(1, c.base + v)
+			c.frame.Size = UDim2.fromOffset(r * 2, r * 2)
+		end
+	end
+
+	function R:ApplyColor()
+		local col = Config.Color
+		if Config.Chroma then
+			col = Color3.fromHSV(chromaT % 1, 1, 1)
+		elseif aiming and Config.AdsColorOn then
+			col = Config.AdsColor
+		end
+		for _, p in ipairs(self.mainParts) do
+			p[1][p[2]] = col
+			if p[2] == "BackgroundColor3" then
+				p[1].BackgroundTransparency = Config.Transparency
+			else
+				p[1].Transparency = Config.Transparency
+			end
+		end
+		for _, p in ipairs(self.outParts) do
+			p[1][p[2]] = Config.OutlineColor
+			if p[2] == "BackgroundColor3" then
+				p[1].BackgroundTransparency = Config.Transparency
+			else
+				p[1].Transparency = Config.Transparency
+			end
+		end
+	end
+
+	return R
+end
+
+local Main = CreateRenderer(Container)
+local Preview, PreviewContainer, PreviewScale, previewBox
+
+local function rebuild()
+	Main:Build()
+	Container.Visible = Config.Enabled
+	if Preview then Preview:Build() end
+end
+
+--============================================================================
+-- 히트마커
+--============================================================================
+local function playHitmarker(isKill)
+	if not Config.Hitmarker then return end
+	local col = isKill and Config.KillColor or Config.HitColor
+	local L, G, T = Config.HitSize, Config.HitGap, Config.HitThick
+
+	if Config.HitSound then
+		HitSound.SoundId = Config.HitSoundId
+		HitSound.Volume = Config.HitVolume
+		HitSound.PlaybackSpeed = isKill and 0.85 or 1
+		HitSound:Play()
+	end
+
+	for _, d in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
+		local rot = (d[1] * d[2] > 0) and 45 or -45
+		local dist = G + L / 2
+		local f = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromOffset(d[1] * dist, d[2] * dist),
+			Size = UDim2.fromOffset(T, L),
+			Rotation = rot,
+			BackgroundColor3 = col,
+			BorderSizePixel = 0, ZIndex = 10,
+		}, HitLayer)
+		stroke(f, Color3.new(0, 0, 0), 1)
+
+		TweenService:Create(f, TweenInfo.new(Config.HitDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Position = UDim2.fromOffset(d[1] * (dist + 6), d[2] * (dist + 6)),
+			BackgroundTransparency = 1,
+		}):Play()
+		task.delay(Config.HitDuration + 0.05, function()
+			if f then f:Destroy() end
+		end)
+	end
+end
+
+--============================================================================
+-- 메뉴 GUI
+--============================================================================
+local MenuGui = new("ScreenGui", {
+	Name = "CrosshairMenu",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 900,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, PlayerGui)
+
+local Window = panelize(new("Frame", {
+	Name = "Window",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(700, 620),
+	BackgroundColor3 = Theme.Background,
+	BorderSizePixel = 0,
+	Visible = false,
+}, MenuGui))
+stroke(Window, Theme.Black, 2)
+
+local InnerBorder = new("Frame", {
+	Position = UDim2.fromOffset(1, 1),
+	Size = UDim2.new(1, -2, 1, -2),
+	BackgroundTransparency = 1, ZIndex = 30,
+}, Window)
+stroke(InnerBorder, Theme.Border, 1)
+
+local TitleBar = panelize(new("Frame", {
+	Size = UDim2.new(1, 0, 0, 30),
+	BackgroundColor3 = Theme.Panel,
+	BorderSizePixel = 0,
+}, Window))
+accentize(new("Frame", { Position = UDim2.new(0, 0, 1, -2), Size = UDim2.new(1, 0, 0, 2), BorderSizePixel = 0 }, TitleBar))
+accentize(new("Frame", { Position = UDim2.fromOffset(10, 10), Size = UDim2.fromOffset(4, 10), BorderSizePixel = 0 }, TitleBar))
+new("TextLabel", {
+	Position = UDim2.fromOffset(22, 0),
+	Size = UDim2.new(1, -32, 1, 0),
+	BackgroundTransparency = 1,
+	Font = Theme.Font, TextSize = Theme.TextSize,
+	TextColor3 = Theme.Text,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "crosshair customizer",
+}, TitleBar)
+local HintLabel = new("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -10, 0, 0),
+	Size = UDim2.fromOffset(200, 30),
+	BackgroundTransparency = 1,
+	Font = Theme.Font, TextSize = Theme.TextSize,
+	TextColor3 = Theme.SubText,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	Text = "RightShift",
+}, TitleBar)
+
+do
+	local dragging, dragStart, startPos = false, nil, nil
+	TitleBar.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, dragStart, startPos = true, i.Position, Window.Position
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - dragStart
+			Window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+end
+
+local TabBar = panelize(new("Frame", {
+	Position = UDim2.fromOffset(0, 30),
+	Size = UDim2.new(1, 0, 0, 28),
+	BackgroundColor3 = Theme.Panel2,
+	BorderSizePixel = 0,
+}, Window))
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal }, TabBar)
+
+local Body = new("Frame", {
+	Position = UDim2.fromOffset(8, 66),
+	Size = UDim2.new(1, -16, 1, -74),
+	BackgroundTransparency = 1,
+}, Window)
+
+local Popups = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 60 }, Window)
+
+local Tooltip = new("TextLabel", {
+	BackgroundColor3 = Theme.Panel,
+	BorderSizePixel = 0,
+	Font = Theme.Font, TextSize = Theme.TextSize,
+	TextColor3 = Theme.Text,
+	Visible = false, ZIndex = 90,
+	AutomaticSize = Enum.AutomaticSize.XY,
+	Text = "",
+}, Popups)
+stroke(Tooltip, Theme.Border, 1)
+new("UIPadding", {
+	PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6),
+	PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 3),
+}, Tooltip)
+
+local function attachTooltip(gui, text)
+	if not text then return end
+	gui.MouseEnter:Connect(function()
+		Tooltip.Text = text
+		Tooltip.Visible = true
+	end)
+	gui.MouseLeave:Connect(function() Tooltip.Visible = false end)
+	gui.MouseMoved:Connect(function(x, y)
+		Tooltip.Position = UDim2.fromOffset(
+			x - Window.AbsolutePosition.X + 14,
+			y - Window.AbsolutePosition.Y - 6
+		)
+	end)
+end
+
+--============================================================================
+-- UI 요소
+--============================================================================
+local Tabs = {}
+
+local function Tab(name)
+	local btn = panelize(new("TextButton", {
+		Size = UDim2.fromOffset(98, 28),
+		BackgroundColor3 = Theme.Panel2,
+		BorderSizePixel = 0, AutoButtonColor = false,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText, Text = name,
+	}, TabBar))
+
+	local underline = accentize(new("Frame", {
+		Position = UDim2.new(0, 0, 1, -2),
+		Size = UDim2.new(1, 0, 0, 2),
+		BorderSizePixel = 0, Visible = false,
+	}, btn))
+
+	local page = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false }, Body)
+
+	local function column(xScale)
+		local col = new("ScrollingFrame", {
+			Position = UDim2.new(xScale, xScale > 0 and 5 or 0, 0, 0),
+			Size = UDim2.new(0.5, -5, 1, 0),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			ScrollBarThickness = 3,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		}, page)
+		accentize(col, "ScrollBarImageColor3")
+		new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, col)
+		return col
+	end
+
+	local t = { Button = btn, Page = page, Left = column(0), Right = column(0.5), Underline = underline }
+
+	local function select()
+		for _, o in ipairs(Tabs) do
+			o.Page.Visible = false
+			o.Underline.Visible = false
+			o.Button.TextColor3 = Theme.SubText
+		end
+		page.Visible = true
+		underline.Visible = true
+		btn.TextColor3 = Theme.Text
+	end
+	btn.MouseButton1Click:Connect(select)
+	btn.MouseEnter:Connect(function() if not page.Visible then btn.TextColor3 = Theme.Text end end)
+	btn.MouseLeave:Connect(function() if not page.Visible then btn.TextColor3 = Theme.SubText end end)
+
+	table.insert(Tabs, t)
+	if #Tabs == 1 then select() end
+	return t
+end
+
+local function Groupbox(parent, title)
+	local box = panelize(new("Frame", {
+		Size = UDim2.new(1, -6, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Theme.Panel,
+		BorderSizePixel = 0,
+	}, parent))
+	stroke(box, Theme.Black, 1)
+
+	local head = panelize(new("Frame", {
+		Size = UDim2.new(1, 0, 0, 24),
+		BackgroundColor3 = Theme.Panel2,
+		BorderSizePixel = 0,
+	}, box))
+	accentize(new("Frame", { Size = UDim2.fromOffset(2, 24), BorderSizePixel = 0 }, head))
+	new("TextLabel", {
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -16, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = title,
+	}, head)
+
+	local holder = new("Frame", {
+		Position = UDim2.fromOffset(10, 32),
+		Size = UDim2.new(1, -20, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, box)
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, holder)
+	new("UIPadding", { PaddingBottom = UDim.new(0, 12) }, holder)
+	return holder
+end
+
+local function Toggle(parent, text, default, callback, tip)
+	local row = new("TextButton", {
+		Size = UDim2.new(1, 0, 0, 16),
+		BackgroundTransparency = 1, AutoButtonColor = false, Text = "",
+	}, parent)
+
+	local box = new("Frame", {
+		Size = UDim2.fromOffset(12, 12),
+		Position = UDim2.fromOffset(0, 2),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0,
+	}, row)
+	stroke(box, Theme.Black, 1)
+	local fill = accentize(new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0, 0),
+		BorderSizePixel = 0,
+	}, box))
+
+	local label = new("TextLabel", {
+		Position = UDim2.fromOffset(20, 0),
+		Size = UDim2.new(1, -20, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Text = text,
+	}, row)
+
+	local state = false
+	local api = {}
+	function api:Set(v, silent)
+		state = v and true or false
+		TweenService:Create(fill, TweenInfo.new(0.12), {
+			Size = state and UDim2.fromScale(1, 1) or UDim2.fromScale(0, 0),
+		}):Play()
+		label.TextColor3 = state and Theme.Text or Theme.SubText
+		if not silent then callback(state) end
+	end
+	function api:Get() return state end
+
+	row.MouseButton1Click:Connect(function() api:Set(not state) end)
+	attachTooltip(row, tip)
+	api:Set(default, true)
+	return api
+end
+
+local function Slider(parent, text, min, max, default, step, callback, tip)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1 }, parent)
+
+	new("TextLabel", {
+		Size = UDim2.new(1, -50, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Text = text,
+	}, row)
+	local valueLabel = new("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Text = "",
+	}, row)
+
+	local bar = new("Frame", {
+		Position = UDim2.fromOffset(0, 18),
+		Size = UDim2.new(1, 0, 0, 8),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0,
+	}, row)
+	stroke(bar, Theme.Black, 1)
+	local fill = accentize(new("Frame", { Size = UDim2.fromScale(0, 1), BorderSizePixel = 0 }, bar))
+
+	local value = default
+	local api = {}
+	function api:Set(v, silent)
+		if type(v) ~= "number" then return end
+		v = math.clamp(v, min, max)
+		if step and step > 0 then v = math.floor(v / step + 0.5) * step end
+		v = math.floor(v * 1000 + 0.5) / 1000
+		value = v
+		fill.Size = UDim2.fromScale((v - min) / (max - min), 1)
+		valueLabel.Text = tostring(v)
+		if not silent then callback(v) end
+	end
+	function api:Get() return value end
+
+	local dragging = false
+	local function update(i)
+		local rel = (i.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X
+		api:Set(min + (max - min) * math.clamp(rel, 0, 1))
+	end
+	bar.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; update(i)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			update(i)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+
+	attachTooltip(row, tip)
+	api:Set(default, true)
+	return api
+end
+
+local function Dropdown(parent, text, options, default, callback, tip)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1 }, parent)
+	new("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left, Text = text,
+	}, row)
+
+	local btn = new("TextButton", {
+		Position = UDim2.fromOffset(0, 16),
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0, AutoButtonColor = false,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text, Text = tostring(default),
+	}, row)
+	stroke(btn, Theme.Black, 1)
+	new("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -6, 0.5, 0),
+		Size = UDim2.fromOffset(10, 20),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText, Text = "v",
+	}, btn)
+
+	local list = new("Frame", {
+		BackgroundColor3 = Theme.Panel,
+		BorderSizePixel = 0, Visible = false, ZIndex = 70,
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, Popups)
+	accentize(stroke(list, Theme.Accent, 1), "Color")
+	new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+	local api = {}
+	function api:Set(v, silent)
+		btn.Text = tostring(v)
+		if not silent then callback(v) end
+	end
+	function api:Get() return btn.Text end
+
+	for _, opt in ipairs(options) do
+		local item = new("TextButton", {
+			Size = UDim2.new(1, 0, 0, 20),
+			BackgroundColor3 = Theme.Panel,
+			BorderSizePixel = 0, AutoButtonColor = false,
+			Font = Theme.Font, TextSize = Theme.TextSize,
+			TextColor3 = Theme.SubText, Text = opt, ZIndex = 71,
+		}, list)
+		item.MouseEnter:Connect(function()
+			item.TextColor3 = Theme.Text
+			item.BackgroundColor3 = Theme.Element
+		end)
+		item.MouseLeave:Connect(function()
+			item.TextColor3 = Theme.SubText
+			item.BackgroundColor3 = Theme.Panel
+		end)
+		item.MouseButton1Click:Connect(function()
+			list.Visible = false
+			api:Set(opt)
+		end)
+	end
+
+	btn.MouseButton1Click:Connect(function()
+		if list.Visible then list.Visible = false return end
+		list.Position = UDim2.fromOffset(
+			btn.AbsolutePosition.X - Window.AbsolutePosition.X,
+			btn.AbsolutePosition.Y - Window.AbsolutePosition.Y + btn.AbsoluteSize.Y + 2
+		)
+		list.Size = UDim2.fromOffset(btn.AbsoluteSize.X, 0)
+		list.Visible = true
+	end)
+
+	attachTooltip(row, tip)
+	return api
+end
+
+local function ColorPicker(parent, text, default, callback, tip)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1 }, parent)
+	new("TextLabel", {
+		Size = UDim2.new(1, -40, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left, Text = text,
+	}, row)
+
+	local swatch = new("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.fromOffset(32, 13),
+		BackgroundColor3 = default,
+		BorderSizePixel = 0, AutoButtonColor = false, Text = "",
+	}, row)
+	stroke(swatch, Theme.Black, 1)
+
+	local popup = new("Frame", {
+		Size = UDim2.fromOffset(196, 168),
+		BackgroundColor3 = Theme.Panel,
+		BorderSizePixel = 0, Visible = false, ZIndex = 70,
+	}, Popups)
+	accentize(stroke(popup, Theme.Accent, 1), "Color")
+
+	local h, s, v = Color3.toHSV(default)
+
+	local sv = new("Frame", {
+		Position = UDim2.fromOffset(10, 10),
+		Size = UDim2.fromOffset(176, 104),
+		BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+		BorderSizePixel = 0, ZIndex = 71,
+	}, popup)
+	local w1 = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 72 }, sv)
+	new("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }) }, w1)
+	local b1 = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0, ZIndex = 73 }, sv)
+	new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }) }, b1)
+
+	local cursor = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(7, 7),
+		BackgroundTransparency = 1, ZIndex = 74,
+	}, sv)
+	stroke(cursor, Color3.new(1, 1, 1), 1)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, cursor)
+
+	local hueBar = new("Frame", {
+		Position = UDim2.fromOffset(10, 122),
+		Size = UDim2.fromOffset(176, 12),
+		BorderSizePixel = 0, ZIndex = 71,
+	}, popup)
+	new("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+			ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+			ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+			ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
+			ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+			ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+			ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
+		}),
+	}, hueBar)
+	local hueCursor = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Size = UDim2.fromOffset(2, 12),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0, ZIndex = 72,
+	}, hueBar)
+
+	local hexBox = new("TextBox", {
+		Position = UDim2.fromOffset(10, 140),
+		Size = UDim2.fromOffset(176, 18),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text, ZIndex = 71,
+		ClearTextOnFocus = false, Text = "",
+	}, popup)
+	stroke(hexBox, Theme.Black, 1)
+
+	local api = {}
+	local function refresh(silent)
+		local color = Color3.fromHSV(h, s, v)
+		swatch.BackgroundColor3 = color
+		sv.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+		cursor.Position = UDim2.fromScale(s, 1 - v)
+		hueCursor.Position = UDim2.fromScale(h, 0)
+		hexBox.Text = string.format("#%02X%02X%02X",
+			math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5))
+		if not silent then callback(color) end
+	end
+
+	function api:Set(color, silent)
+		if typeof(color) ~= "Color3" then return end
+		h, s, v = Color3.toHSV(color)
+		refresh(silent)
+	end
+	function api:Get() return Color3.fromHSV(h, s, v) end
+
+	hexBox.FocusLost:Connect(function()
+		local hex = hexBox.Text:gsub("#", "")
+		local n = tonumber(hex, 16)
+		if #hex == 6 and n then
+			api:Set(Color3.fromRGB(math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256))
+		else
+			refresh(true)
+		end
+	end)
+
+	local dragSV, dragHue = false, false
+	sv.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragSV = true end end)
+	hueBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragHue = true end end)
+	UserInputService.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then dragSV, dragHue = false, false end
+	end)
+	UserInputService.InputChanged:Connect(function(i)
+		if i.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+		if dragSV then
+			s = math.clamp((i.Position.X - sv.AbsolutePosition.X) / sv.AbsoluteSize.X, 0, 1)
+			v = 1 - math.clamp((i.Position.Y - sv.AbsolutePosition.Y) / sv.AbsoluteSize.Y, 0, 1)
+			refresh()
+		elseif dragHue then
+			h = math.clamp((i.Position.X - hueBar.AbsolutePosition.X) / hueBar.AbsoluteSize.X, 0, 1)
+			refresh()
+		end
+	end)
+
+	swatch.MouseButton1Click:Connect(function()
+		if popup.Visible then popup.Visible = false return end
+		popup.Position = UDim2.fromOffset(
+			math.clamp(swatch.AbsolutePosition.X - Window.AbsolutePosition.X - 160, 4, Window.AbsoluteSize.X - 200),
+			math.clamp(swatch.AbsolutePosition.Y - Window.AbsolutePosition.Y + 18, 4, Window.AbsoluteSize.Y - 174)
+		)
+		popup.Visible = true
+	end)
+
+	attachTooltip(row, tip)
+	refresh(true)
+	return api
+end
+
+local function Button(parent, text, callback, tip)
+	local btn = new("TextButton", {
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0, AutoButtonColor = false,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text, Text = text,
+	}, parent)
+	stroke(btn, Theme.Black, 1)
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = Theme.ElementHover }):Play()
+	end)
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = Theme.Element }):Play()
+	end)
+	btn.MouseButton1Click:Connect(callback)
+	attachTooltip(btn, tip)
+	return btn
+end
+
+local function TextInput(parent, text, default, callback, tip)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1 }, parent)
+	new("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left, Text = text,
+	}, row)
+	local box = new("TextBox", {
+		Position = UDim2.fromOffset(0, 16),
+		Size = UDim2.new(1, 0, 0, 20),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text,
+		ClearTextOnFocus = false,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = default,
+	}, row)
+	new("UIPadding", { PaddingLeft = UDim.new(0, 5) }, box)
+	stroke(box, Theme.Black, 1)
+
+	local api = {}
+	function api:Set(v, silent)
+		box.Text = tostring(v)
+		if not silent then callback(box.Text) end
+	end
+	function api:Get() return box.Text end
+	box.FocusLost:Connect(function() callback(box.Text) end)
+	attachTooltip(row, tip)
+	return api
+end
+
+local function Keybind(parent, text, default, callback, tip)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1 }, parent)
+	new("TextLabel", {
+		Size = UDim2.new(1, -90, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left, Text = text,
+	}, row)
+	local btn = new("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.fromOffset(86, 18),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0, AutoButtonColor = false,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text, Text = default.Name,
+	}, row)
+	stroke(btn, Theme.Black, 1)
+
+	local listening = false
+	btn.MouseButton1Click:Connect(function()
+		listening = true
+		btn.Text = "[...]"
+	end)
+	UserInputService.InputBegan:Connect(function(i)
+		if listening and i.UserInputType == Enum.UserInputType.Keyboard then
+			listening = false
+			btn.Text = i.KeyCode.Name
+			callback(i.KeyCode)
+		end
+	end)
+	attachTooltip(row, tip)
+	return { Set = function(_, k) btn.Text = k.Name end }
+end
+
+local function Label(parent, text)
+	return new("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Text = text,
+	}, parent)
+end
+
+local function Divider(parent)
+	return new("Frame", {
+		Size = UDim2.new(1, 0, 0, 1),
+		BackgroundColor3 = Theme.Border,
+		BorderSizePixel = 0,
+	}, parent)
+end
+
+--============================================================================
+-- 알림
+--============================================================================
+local NotifyHolder = new("Frame", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 12, 1, -12),
+	Size = UDim2.fromOffset(320, 220),
+	BackgroundTransparency = 1,
+}, MenuGui)
+new("UIListLayout", {
+	VerticalAlignment = Enum.VerticalAlignment.Bottom,
+	Padding = UDim.new(0, 5),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, NotifyHolder)
+
+local function Notify(text, duration)
+	if not Config.Notifications then return end
+	local f = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 24),
+		BackgroundColor3 = Theme.Panel,
+		BorderSizePixel = 0,
+		BackgroundTransparency = 1,
+	}, NotifyHolder)
+	stroke(f, Theme.Black, 1)
+	accentize(new("Frame", { Size = UDim2.fromOffset(2, 24), BorderSizePixel = 0 }, f))
+	local lbl = new("TextLabel", {
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -14, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Theme.Font, TextSize = Theme.TextSize,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTransparency = 1, Text = text,
+	}, f)
+	TweenService:Create(f, TweenInfo.new(0.15), { BackgroundTransparency = 0 }):Play()
+	TweenService:Create(lbl, TweenInfo.new(0.15), { TextTransparency = 0 }):Play()
+	task.delay(duration or 2.5, function()
+		if not f.Parent then return end
+		TweenService:Create(f, TweenInfo.new(0.2), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(lbl, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
+		task.wait(0.25)
+		f:Destroy()
+	end)
+end
+
+--============================================================================
+-- 워터마크
+--============================================================================
+local Watermark = new("Frame", {
+	Position = UDim2.fromOffset(12, 12),
+	Size = UDim2.fromOffset(0, 22),
+	AutomaticSize = Enum.AutomaticSize.X,
+	BackgroundColor3 = Theme.Panel,
+	BorderSizePixel = 0,
+}, MenuGui)
+stroke(Watermark, Theme.Black, 1)
+accentize(new("Frame", { Size = UDim2.new(1, 0, 0, 2), BorderSizePixel = 0 }, Watermark))
+local WatermarkText = new("TextLabel", {
+	Position = UDim2.fromOffset(8, 0),
+	Size = UDim2.fromOffset(0, 22),
+	AutomaticSize = Enum.AutomaticSize.X,
+	BackgroundTransparency = 1,
+	Font = Theme.Font, TextSize = Theme.TextSize,
+	TextColor3 = Theme.Text, Text = "crosshair",
+}, Watermark)
+new("UIPadding", { PaddingRight = UDim.new(0, 8) }, WatermarkText)
+
+--============================================================================
+-- HUD 감지 (본인 게임의 기존 조준선 숨기기)
+--============================================================================
+local HiddenElements = {}
+local HudKeywords = { "crosshair", "crossair", "reticle", "reticule", "aim", "sight", "scope", "cursor" }
+
+local function isOurs(inst)
+	return inst == CrosshairGui or inst == MenuGui
+		or inst:IsDescendantOf(CrosshairGui) or inst:IsDescendantOf(MenuGui)
+end
+
+local function looksLikeCrosshair(name)
+	local lower = name:lower()
+	for _, kw in ipairs(HudKeywords) do
+		if lower:find(kw, 1, true) then return true end
+	end
+	return false
+end
+
+local function collectHud()
+	local out = {}
+	for _, gui in ipairs(PlayerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") and not isOurs(gui) then
+			table.insert(out, gui)
+			for _, d in ipairs(gui:GetDescendants()) do
+				if d:IsA("GuiObject") and looksLikeCrosshair(d.Name) then
+					table.insert(out, d)
+				end
+			end
+		end
+	end
+	return out
+end
+
+local function setHidden(inst, hidden)
+	if not inst or not inst.Parent then return end
+	local prop = inst:IsA("ScreenGui") and "Enabled" or "Visible"
+	if hidden then
+		if HiddenElements[inst] == nil then HiddenElements[inst] = inst[prop] end
+		inst[prop] = false
+	elseif HiddenElements[inst] ~= nil then
+		inst[prop] = HiddenElements[inst]
+		HiddenElements[inst] = nil
+	end
+end
+
+local function restoreAll()
+	for inst, original in pairs(HiddenElements) do
+		if inst and inst.Parent then
+			local prop = inst:IsA("ScreenGui") and "Enabled" or "Visible"
+			inst[prop] = original
+		end
+	end
+	table.clear(HiddenElements)
+end
+
+--============================================================================
+-- 스냅샷 / 복원
+--============================================================================
+local Controls = {}
+local syncControls, applyPreset, refreshHudList
+
+local function snapshot()
+	local copy = {}
+	for k, v in pairs(Config) do
+		copy[k] = (typeof(v) == "Color3") and { v.R, v.G, v.B } or v
+	end
+	return copy
+end
+
+local function restore(data)
+	for k, v in pairs(data) do
+		if type(v) == "table" and #v == 3 then
+			Config[k] = Color3.new(v[1], v[2], v[3])
+		elseif Config[k] ~= nil then
+			Config[k] = v
+		end
+	end
+end
+
+--============================================================================
+-- 탭 구성
+--============================================================================
+local tCross  = Tab("조준선")
+local tShape  = Tab("모양")
+local tColor  = Tab("색상")
+local tAnim   = Tab("애니메이션")
+local tHit    = Tab("히트마커")
+local tHud    = Tab("HUD")
+local tConfig = Tab("설정")
+
+------------------------------------------------------------------ 조준선 탭
+local gBasic = Groupbox(tCross.Left, "기본")
+Controls.Enabled = Toggle(gBasic, "크로스헤어 켜기", Config.Enabled, function(v)
+	Config.Enabled = v; rebuild()
+end, "전체 표시 여부")
+Controls.Shape = Dropdown(gBasic, "모양", ShapeList, Config.Shape, function(v)
+	Config.Shape = v
+	if ShapeArms[v] then
+		local a = ShapeArms[v]
+		Config.ArmTop, Config.ArmBottom, Config.ArmLeft, Config.ArmRight = a[1], a[2], a[3], a[4]
+		Controls.ArmTop:Set(a[1], true); Controls.ArmBottom:Set(a[2], true)
+		Controls.ArmLeft:Set(a[3], true); Controls.ArmRight:Set(a[4], true)
+	end
+	rebuild()
+end, "라인 조합 / 브래킷 / 다이아몬드 등")
+Controls.Length    = Slider(gBasic, "길이", 1, 50, Config.Length, 1, function(v) Config.Length = v; rebuild() end)
+Controls.Thickness = Slider(gBasic, "두께", 1, 12, Config.Thickness, 1, function(v) Config.Thickness = v; rebuild() end)
+Controls.Gap       = Slider(gBasic, "중앙 간격", 0, 50, Config.Gap, 1, function(v)
+	Config.Gap = v; Main:ApplySpread(spread); if Preview then Preview:ApplySpread(spread) end
+end)
+Controls.Rotation  = Slider(gBasic, "회전", 0, 180, Config.Rotation, 1, function(v) Config.Rotation = v end)
+Controls.Scale     = Slider(gBasic, "전체 배율", 0.25, 3, Config.Scale, 0.05, function(v) Config.Scale = v end, "모든 요소를 한번에 확대/축소")
+
+local gPos = Groupbox(tCross.Left, "위치 보정")
+Label(gPos, "화면 정중앙과 실제 탄착점이 다를 때 사용하세요.")
+Controls.OffsetX = Slider(gPos, "가로 오프셋", -100, 100, Config.OffsetX, 1, function(v)
+	Config.OffsetX = v; Anchor.Position = UDim2.new(0.5, v, 0.5, Config.OffsetY)
+end)
+Controls.OffsetY = Slider(gPos, "세로 오프셋", -100, 100, Config.OffsetY, 1, function(v)
+	Config.OffsetY = v; Anchor.Position = UDim2.new(0.5, Config.OffsetX, 0.5, v)
+end)
+Button(gPos, "오프셋 초기화", function()
+	Controls.OffsetX:Set(0); Controls.OffsetY:Set(0); Notify("오프셋 초기화됨")
+end)
+
+local gPrev = Groupbox(tCross.Right, "미리보기")
+previewBox = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 170),
+	BackgroundColor3 = Color3.fromRGB(48, 52, 58),
+	BorderSizePixel = 0, ClipsDescendants = true,
+}, gPrev)
+stroke(previewBox, Theme.Black, 1)
+new("Frame", {
+	Size = UDim2.new(0.5, 0, 1, 0),
+	BackgroundColor3 = Color3.fromRGB(206, 210, 216),
+	BorderSizePixel = 0,
+}, previewBox)
+new("Frame", {
+	Position = UDim2.new(0, 0, 0.62, 0),
+	Size = UDim2.new(1, 0, 0.38, 0),
+	BackgroundColor3 = Color3.fromRGB(24, 26, 30),
+	BackgroundTransparency = 0.2,
+	BorderSizePixel = 0,
+}, previewBox)
+PreviewContainer = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(0, 0),
+	BackgroundTransparency = 1,
+}, previewBox)
+PreviewScale = new("UIScale", {}, PreviewContainer)
+Preview = CreateRenderer(PreviewContainer)
+
+local gPreset = Groupbox(tCross.Right, "프리셋")
+local presetNames = {}
+for k in pairs(Presets) do table.insert(presetNames, k) end
+table.sort(presetNames)
+Dropdown(gPreset, "프리셋 선택", presetNames, presetNames[1], function(v)
+	applyPreset(Presets[v]); Notify("프리셋 적용: " .. v)
+end)
+
+local gArms = Groupbox(tCross.Right, "개별 라인")
+Label(gArms, "라인 계열 모양에서 각 방향을 껐다 켤 수 있습니다.")
+Controls.ArmTop    = Toggle(gArms, "위쪽",   Config.ArmTop,    function(v) Config.ArmTop = v; rebuild() end)
+Controls.ArmBottom = Toggle(gArms, "아래쪽", Config.ArmBottom, function(v) Config.ArmBottom = v; rebuild() end)
+Controls.ArmLeft   = Toggle(gArms, "왼쪽",   Config.ArmLeft,   function(v) Config.ArmLeft = v; rebuild() end)
+Controls.ArmRight  = Toggle(gArms, "오른쪽", Config.ArmRight,  function(v) Config.ArmRight = v; rebuild() end)
+
+------------------------------------------------------------------- 모양 탭
+local gDot = Groupbox(tShape.Left, "중앙 점")
+Controls.Dot      = Toggle(gDot, "점 표시", Config.Dot, function(v) Config.Dot = v; rebuild() end)
+Controls.DotSize  = Slider(gDot, "점 크기", 1, 12, Config.DotSize, 1, function(v) Config.DotSize = v; rebuild() end)
+Controls.DotRound = Toggle(gDot, "둥근 점", Config.DotRound, function(v) Config.DotRound = v; rebuild() end)
+
+local gCircle = Groupbox(tShape.Left, "원형 링")
+Controls.Circle       = Toggle(gCircle, "링 표시", Config.Circle, function(v) Config.Circle = v; rebuild() end)
+Controls.CircleRadius = Slider(gCircle, "반지름", 2, 80, Config.CircleRadius, 1, function(v) Config.CircleRadius = v; rebuild() end)
+Controls.CircleThick  = Slider(gCircle, "링 두께", 1, 10, Config.CircleThick, 1, function(v) Config.CircleThick = v; rebuild() end)
+Label(gCircle, "Diamond / Square 모양도 이 반지름과 두께를 사용합니다.")
+
+local gCombo = Groupbox(tShape.Right, "빠른 조합")
+Button(gCombo, "십자 + 점", function() applyPreset({ Shape="Cross", Dot=true,  Circle=false }); Notify("적용됨") end)
+Button(gCombo, "십자 + 링", function() applyPreset({ Shape="Cross", Dot=false, Circle=true  }); Notify("적용됨") end)
+Button(gCombo, "링 + 점",   function() applyPreset({ Shape="None",  Dot=true,  Circle=true  }); Notify("적용됨") end)
+Button(gCombo, "점만",      function() applyPreset({ Shape="None",  Dot=true,  Circle=false }); Notify("적용됨") end)
+
+local gShapeInfo = Groupbox(tShape.Right, "모양 설명")
+Label(gShapeInfo, "Cross / T-Shape / Inverted T / Horizontal / Vertical\n  -> 4방향 라인 조합\n\nBrackets  -> 네 모서리 ㄱ자\nDiamond   -> 마름모 테두리\nSquare    -> 사각 테두리\nChevron   -> 회전과 같이 쓰면 삼각 모양\nNone      -> 점 / 링만 사용")
+
+------------------------------------------------------------------- 색상 탭
+local gMainCol = Groupbox(tColor.Left, "메인 색상")
+Controls.Color = ColorPicker(gMainCol, "조준선 색", Config.Color, function(c)
+	Config.Color = c; Main:ApplyColor(); if Preview then Preview:ApplyColor() end
+end)
+Controls.Transparency = Slider(gMainCol, "투명도", 0, 1, Config.Transparency, 0.05, function(v)
+	Config.Transparency = v; Main:ApplyColor(); if Preview then Preview:ApplyColor() end
+end)
+Controls.Chroma = Toggle(gMainCol, "무지개 (크로마)", Config.Chroma, function(v)
+	Config.Chroma = v; Main:ApplyColor(); if Preview then Preview:ApplyColor() end
+end, "색상이 계속 순환합니다")
+Controls.ChromaSpeed = Slider(gMainCol, "크로마 속도", 0.1, 5, Config.ChromaSpeed, 0.1, function(v) Config.ChromaSpeed = v end)
+
+local gOutline = Groupbox(tColor.Left, "외곽선")
+Label(gOutline, "밝은 배경에서도 조준선이 보이게 해줍니다.")
+Controls.Outline      = Toggle(gOutline, "외곽선 사용", Config.Outline, function(v) Config.Outline = v; rebuild() end)
+Controls.OutlineColor = ColorPicker(gOutline, "외곽선 색", Config.OutlineColor, function(c)
+	Config.OutlineColor = c; Main:ApplyColor(); if Preview then Preview:ApplyColor() end
+end)
+Controls.OutlineSize  = Slider(gOutline, "외곽선 두께", 1, 6, Config.OutlineSize, 1, function(v) Config.OutlineSize = v; rebuild() end)
+
+local gAds = Groupbox(tColor.Right, "조준(ADS) 상태")
+Label(gAds, "_G.Crosshair:SetAiming(true) 호출 시 적용됩니다.")
+Controls.AdsColorOn = Toggle(gAds, "조준 시 색 변경", Config.AdsColorOn, function(v) Config.AdsColorOn = v; Main:ApplyColor() end)
+Controls.AdsColor   = ColorPicker(gAds, "조준 색", Config.AdsColor, function(c) Config.AdsColor = c; Main:ApplyColor() end)
+Controls.AdsScale   = Slider(gAds, "조준 시 크기 배율", 0.2, 2, Config.AdsScale, 0.05, function(v) Config.AdsScale = v end)
+Controls.AdsHide    = Toggle(gAds, "조준 시 완전히 숨기기", Config.AdsHide, function(v) Config.AdsHide = v end, "스코프를 쓸 때 유용")
+
+local gTestCol = Groupbox(tColor.Right, "테스트")
+Button(gTestCol, "조준 상태 토글", function()
+	aiming = not aiming
+	Main:ApplyColor()
+	Notify("조준: " .. (aiming and "ON" or "OFF"))
+end)
+
+-------------------------------------------------------------- 애니메이션 탭
+local gDyn = Groupbox(tAnim.Left, "다이나믹 스프레드")
+Label(gDyn, "이동 / 점프 / 사격에 따라 조준선이 벌어집니다.")
+Controls.Dynamic = Toggle(gDyn, "다이나믹 사용", Config.Dynamic, function(v)
+	Config.Dynamic = v
+	if not v then
+		spread, punch = 0, 0
+		Main:ApplySpread(0); if Preview then Preview:ApplySpread(0) end
+	end
+end)
+Controls.MoveSpread   = Slider(gDyn, "이동 시 벌어짐", 0, 50, Config.MoveSpread, 1, function(v) Config.MoveSpread = v end)
+Controls.JumpSpread   = Slider(gDyn, "점프 시 벌어짐", 0, 80, Config.JumpSpread, 1, function(v) Config.JumpSpread = v end)
+Controls.CrouchSpread = Slider(gDyn, "저속 이동 시 변화", -20, 20, Config.CrouchSpread, 1, function(v) Config.CrouchSpread = v end, "음수면 좁아집니다")
+Controls.PunchAmount  = Slider(gDyn, "발사 반동", 0, 60, Config.PunchAmount, 1, function(v) Config.PunchAmount = v end)
+Controls.Recovery     = Slider(gDyn, "복귀 속도", 1, 40, Config.Recovery, 1, function(v) Config.Recovery = v end)
+
+local gMotion = Groupbox(tAnim.Right, "모션 효과")
+Controls.Pulse       = Toggle(gMotion, "펄스 (숨쉬기)", Config.Pulse, function(v)
+	Config.Pulse = v; if not v then pulseT = 0 end
+end, "크기가 부드럽게 커졌다 작아집니다")
+Controls.PulseAmount = Slider(gMotion, "펄스 크기", 0.02, 0.5, Config.PulseAmount, 0.01, function(v) Config.PulseAmount = v end)
+Controls.PulseSpeed  = Slider(gMotion, "펄스 속도", 0.5, 10, Config.PulseSpeed, 0.1, function(v) Config.PulseSpeed = v end)
+Divider(gMotion)
+Controls.Spin      = Toggle(gMotion, "회전 애니메이션", Config.Spin, function(v)
+	Config.Spin = v; if not v then spinAng = 0 end
+end)
+Controls.SpinSpeed = Slider(gMotion, "회전 속도 (도/초)", -360, 360, Config.SpinSpeed, 5, function(v) Config.SpinSpeed = v end)
+
+local gAnimTest = Groupbox(tAnim.Right, "테스트")
+Button(gAnimTest, "반동 미리보기", function() punch += Config.PunchAmount end)
+Button(gAnimTest, "연사 미리보기", function()
+	task.spawn(function()
+		for _ = 1, 8 do punch += Config.PunchAmount; task.wait(0.09) end
+	end)
+end)
+
+--------------------------------------------------------------- 히트마커 탭
+local gHit = Groupbox(tHit.Left, "히트마커")
+Label(gHit, "_G.Crosshair:Hit(false) / Hit(true) 로 호출합니다.")
+Controls.Hitmarker   = Toggle(gHit, "히트마커 사용", Config.Hitmarker, function(v) Config.Hitmarker = v end)
+Controls.HitColor    = ColorPicker(gHit, "히트 색", Config.HitColor, function(c) Config.HitColor = c end)
+Controls.KillColor   = ColorPicker(gHit, "킬 색", Config.KillColor, function(c) Config.KillColor = c end)
+Controls.HitSize     = Slider(gHit, "길이", 2, 40, Config.HitSize, 1, function(v) Config.HitSize = v end)
+Controls.HitGap      = Slider(gHit, "간격", 0, 30, Config.HitGap, 1, function(v) Config.HitGap = v end)
+Controls.HitThick    = Slider(gHit, "두께", 1, 8, Config.HitThick, 1, function(v) Config.HitThick = v end)
+Controls.HitDuration = Slider(gHit, "지속 시간", 0.05, 1, Config.HitDuration, 0.01, function(v) Config.HitDuration = v end)
+
+local gHitSound = Groupbox(tHit.Right, "사운드")
+Controls.HitSound   = Toggle(gHitSound, "히트 사운드", Config.HitSound, function(v) Config.HitSound = v end)
+Controls.HitSoundId = TextInput(gHitSound, "사운드 ID", Config.HitSoundId, function(v)
+	Config.HitSoundId = v; HitSound.SoundId = v; Notify("사운드 ID 변경됨")
+end, "rbxassetid://숫자 형식")
+Controls.HitVolume  = Slider(gHitSound, "볼륨", 0, 1, Config.HitVolume, 0.05, function(v)
+	Config.HitVolume = v; HitSound.Volume = v
+end)
+
+local gHitTest = Groupbox(tHit.Right, "테스트")
+Button(gHitTest, "히트마커 재생", function() playHitmarker(false) end)
+Button(gHitTest, "킬마커 재생", function() playHitmarker(true) end)
+Button(gHitTest, "연속 히트", function()
+	task.spawn(function()
+		for i = 1, 5 do playHitmarker(i == 5); task.wait(0.12) end
+	end)
+end)
+
+-------------------------------------------------------------------- HUD 탭
+local gHudList = Groupbox(tHud.Left, "게임 HUD 요소")
+Label(gHudList, "본인 게임의 기존 조준선을 찾아 숨깁니다. 삭제가 아니라 Visible 만 끄므로 언제든 복원됩니다.")
+local hudListHolder = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+}, gHudList)
+new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, hudListHolder)
+
+function refreshHudList()
+	for _, c in ipairs(hudListHolder:GetChildren()) do
+		if not c:IsA("UIListLayout") then c:Destroy() end
+	end
+	local items = collectHud()
+	if #items == 0 then
+		Label(hudListHolder, "감지된 HUD 요소가 없습니다.")
+		return
+	end
+	for _, inst in ipairs(items) do
+		local suffix = (not inst:IsA("ScreenGui")) and "  <조준선 후보>" or ""
+		Toggle(hudListHolder, inst.Name .. suffix, HiddenElements[inst] ~= nil, function(v)
+			setHidden(inst, v)
+		end, inst:GetFullName())
+	end
+end
+
+Button(gHudList, "목록 새로고침", function() refreshHudList() end)
+
+local gHudAuto = Groupbox(tHud.Right, "자동 처리")
+Button(gHudAuto, "조준선 후보 자동 숨기기", function()
+	local count = 0
+	for _, inst in ipairs(collectHud()) do
+		if not inst:IsA("ScreenGui") then
+			setHidden(inst, true); count += 1
+		end
+	end
+	refreshHudList()
+	Notify(count .. "개 요소를 숨겼습니다")
+end, "이름에 crosshair / reticle / aim 등이 들어간 요소를 찾습니다")
+Button(gHudAuto, "모두 복원", function()
+	restoreAll(); refreshHudList(); Notify("모든 HUD 요소 복원됨")
+end)
+
+local gCursor = Groupbox(tHud.Right, "마우스 / 표시 조건")
+Controls.HideCursor = Toggle(gCursor, "기본 마우스 커서 숨기기", Config.HideCursor, function(v)
+	Config.HideCursor = v; UserInputService.MouseIconEnabled = not v
+end)
+Controls.HideWhenDead = Toggle(gCursor, "사망 시 숨기기", Config.HideWhenDead, function(v) Config.HideWhenDead = v end)
+Controls.HideWhenFree = Toggle(gCursor, "마우스 잠금 해제 시 숨기기", Config.HideWhenFree, function(v) Config.HideWhenFree = v end, "메뉴를 열었을 때 자동으로 숨김")
+
+------------------------------------------------------------------- 설정 탭
+local gSlots = Groupbox(tConfig.Left, "저장 슬롯")
+Label(gSlots, "세션 내에서 4개 설정을 저장 / 불러올 수 있습니다.")
+for i = 1, 4 do
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1 }, gSlots)
+	local save = new("TextButton", {
+		Size = UDim2.new(0.5, -3, 1, 0),
+		BackgroundColor3 = Theme.Element, BorderSizePixel = 0, AutoButtonColor = false,
+		Font = Theme.Font, TextSize = Theme.TextSize, TextColor3 = Theme.Text,
+		Text = "슬롯 " .. i .. " 저장",
+	}, row)
+	stroke(save, Theme.Black, 1)
+	local load = new("TextButton", {
+		Position = UDim2.new(0.5, 3, 0, 0),
+		Size = UDim2.new(0.5, -3, 1, 0),
+		BackgroundColor3 = Theme.Element, BorderSizePixel = 0, AutoButtonColor = false,
+		Font = Theme.Font, TextSize = Theme.TextSize, TextColor3 = Theme.SubText,
+		Text = "불러오기",
+	}, row)
+	stroke(load, Theme.Black, 1)
+
+	save.MouseButton1Click:Connect(function()
+		Slots[i] = snapshot()
+		load.TextColor3 = Theme.Text
+		Notify("슬롯 " .. i .. " 저장됨")
+	end)
+	load.MouseButton1Click:Connect(function()
+		if next(Slots[i]) == nil then Notify("슬롯 " .. i .. " 비어 있음") return end
+		restore(Slots[i]); syncControls(); rebuild()
+		Notify("슬롯 " .. i .. " 불러옴")
+	end)
+end
+
+local gCode = Groupbox(tConfig.Left, "코드 내보내기 / 가져오기")
+local codeBox = TextInput(gCode, "설정 코드", "", function() end, "코드를 복사해 두면 나중에 그대로 복원할 수 있습니다")
+Button(gCode, "현재 설정 -> 코드", function()
+	local ok, encoded = pcall(function() return HttpService:JSONEncode(snapshot()) end)
+	if ok then codeBox:Set(encoded, true); Notify("코드 생성됨 (복사하세요)") else Notify("코드 생성 실패") end
+end)
+Button(gCode, "코드 -> 적용", function()
+	local ok, decoded = pcall(function() return HttpService:JSONDecode(codeBox:Get()) end)
+	if ok and type(decoded) == "table" then
+		restore(decoded); syncControls(); rebuild(); Notify("코드 적용 완료")
+	else
+		Notify("코드 형식이 올바르지 않습니다")
+	end
+end)
+
+local gUI = Groupbox(tConfig.Right, "인터페이스")
+ColorPicker(gUI, "UI 강조색", Theme.Accent, function(c)
+	Theme.Accent = c
+	for _, entry in ipairs(AccentObjects) do
+		if entry[1] and entry[1].Parent then entry[1][entry[2]] = c end
+	end
+end)
+Controls.UITransparency = Slider(gUI, "UI 투명도", 0, 0.6, Config.UITransparency, 0.05, function(v)
+	Config.UITransparency = v
+	for _, obj in ipairs(PanelObjects) do
+		if obj and obj.Parent then obj.BackgroundTransparency = v end
+	end
+end)
+Controls.Watermark = Toggle(gUI, "워터마크 표시", Config.Watermark, function(v)
+	Config.Watermark = v; Watermark.Visible = v
+end)
+Controls.Notifications = Toggle(gUI, "알림 표시", Config.Notifications, function(v) Config.Notifications = v end)
+
+local MenuKey   = Enum.KeyCode.RightShift
+local ToggleKey = Enum.KeyCode.Semicolon
+
+local gKeys = Groupbox(tConfig.Right, "키 설정")
+Keybind(gKeys, "메뉴 열기", MenuKey, function(k)
+	MenuKey = k; HintLabel.Text = k.Name; Notify("메뉴 키: " .. k.Name)
+end)
+Keybind(gKeys, "조준선 On/Off", ToggleKey, function(k)
+	ToggleKey = k; Notify("토글 키: " .. k.Name)
+end)
+
+local gDanger = Groupbox(tConfig.Right, "기타")
+Button(gDanger, "전체 초기화", function()
+	applyPreset(Presets["Classic Cross"])
+	Controls.OffsetX:Set(0); Controls.OffsetY:Set(0); Controls.Scale:Set(1)
+	Notify("초기화 완료")
+end)
+Button(gDanger, "언로드 (완전 종료)", function()
+	restoreAll()
+	UserInputService.MouseIconEnabled = true
+	CrosshairGui:Destroy()
+	MenuGui:Destroy()
+	_G.Crosshair = nil
+end)
+
+--============================================================================
+-- 동기화 / 프리셋
+--============================================================================
+function syncControls()
+	for key, ctrl in pairs(Controls) do
+		if Config[key] ~= nil and ctrl and ctrl.Set then
+			ctrl:Set(Config[key], true)
+		end
+	end
+	Anchor.Position = UDim2.new(0.5, Config.OffsetX, 0.5, Config.OffsetY)
+	Watermark.Visible = Config.Watermark
+	UserInputService.MouseIconEnabled = not Config.HideCursor
+	HitSound.SoundId = Config.HitSoundId
+	HitSound.Volume = Config.HitVolume
+end
+
+function applyPreset(data)
+	for k, v in pairs(data) do Config[k] = v end
+	if ShapeArms[Config.Shape] then
+		local a = ShapeArms[Config.Shape]
+		Config.ArmTop, Config.ArmBottom, Config.ArmLeft, Config.ArmRight = a[1], a[2], a[3], a[4]
+	end
+	syncControls()
+	rebuild()
+end
+
+--============================================================================
+-- 메인 루프
+--============================================================================
+local wmTimer = 0
+RunService.RenderStepped:Connect(function(dt)
+	-- 표시 조건
+	local visible = Config.Enabled and not forcedHidden
+	if visible and Config.HideWhenDead then
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then visible = false end
+	end
+	if visible and Config.HideWhenFree and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+		visible = false
+	end
+	if visible and aiming and Config.AdsHide then visible = false end
+	Container.Visible = visible
+
+	-- 스프레드
+	local target = 0
+	if Config.Dynamic then
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			if hum.MoveDirection.Magnitude > 0.1 then target += Config.MoveSpread end
+			local st = hum:GetState()
+			if st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Jumping then
+				target += Config.JumpSpread
+			end
+			if hum.WalkSpeed > 0 and hum.WalkSpeed < 8 then
+				target += Config.CrouchSpread
+			end
+		end
+	end
+	punch = math.max(0, punch - Config.Recovery * dt * 6)
+	target += punch
+
+	local a = math.clamp(dt * Config.Recovery, 0, 1)
+	local ns = spread + (target - spread) * a
+	if math.abs(ns - spread) > 0.03 then
+		spread = ns
+		Main:ApplySpread(spread)
+		if Preview and Window.Visible then Preview:ApplySpread(spread) end
+	end
+
+	-- 크로마
+	if Config.Chroma then
+		chromaT += dt * Config.ChromaSpeed * 0.2
+		Main:ApplyColor()
+		if Preview and Window.Visible then Preview:ApplyColor() end
+	end
+
+	-- 크기 / 회전
+	local scale = Config.Scale
+	if aiming then scale *= Config.AdsScale end
+	if Config.Pulse then
+		pulseT += dt * Config.PulseSpeed
+		scale *= 1 + math.sin(pulseT) * Config.PulseAmount
+	end
+	ContainerScale.Scale = math.max(0.05, scale)
+	if PreviewScale then PreviewScale.Scale = math.max(0.05, Config.Scale) end
+
+	if Config.Spin then spinAng = (spinAng + Config.SpinSpeed * dt) % 360 end
+	Container.Rotation = Config.Rotation + spinAng
+	if PreviewContainer then PreviewContainer.Rotation = Config.Rotation + spinAng end
+
+	-- 워터마크
+	wmTimer += dt
+	if Config.Watermark and wmTimer > 0.25 then
+		wmTimer = 0
+		local fps = math.floor(1 / math.max(dt, 0.001) + 0.5)
+		local ping = 0
+		pcall(function()
+			ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue() + 0.5)
+		end)
+		WatermarkText.Text = string.format("crosshair | %s | %d fps | %d ms | %s",
+			LocalPlayer.Name, fps, ping, os.date("%H:%M:%S"))
+	end
+end)
+
+--============================================================================
+-- 입력
+--============================================================================
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == MenuKey then
+		Window.Visible = not Window.Visible
+		if Window.Visible then refreshHudList() end
+	elseif input.KeyCode == ToggleKey then
+		Config.Enabled = not Config.Enabled
+		Controls.Enabled:Set(Config.Enabled, true)
+		rebuild()
+		Notify("크로스헤어 " .. (Config.Enabled and "ON" or "OFF"))
+	end
+end)
+
+--============================================================================
+-- 공개 API
+--============================================================================
+_G.Crosshair = {
+	Punch      = function(_, amount) punch += (amount or Config.PunchAmount) end,
+	Hit        = function(_, isKill) playHitmarker(isKill and true or false) end,
+	SetAiming  = function(_, v) aiming = v and true or false; Main:ApplyColor() end,
+	SetVisible = function(_, v) forcedHidden = not v end,
+	Notify     = function(_, text, dur) Notify(text, dur) end,
+	Get        = snapshot,
+	Load       = function(_, data) restore(data); syncControls(); rebuild() end,
+	HideHudElement = function(_, inst, hidden) setHidden(inst, hidden ~= false) end,
+	RestoreHud = function() restoreAll() end,
+}
+
+--============================================================================
+-- 시작
+--============================================================================
+LocalPlayer.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	UserInputService.MouseIconEnabled = not Config.HideCursor
+end)
+
+Watermark.Visible = Config.Watermark
+UserInputService.MouseIconEnabled = not Config.HideCursor
+Anchor.Position = UDim2.new(0.5, Config.OffsetX, 0.5, Config.OffsetY)
+rebuild()
+task.defer(refreshHudList)
+Notify("크로스헤어 로드 완료 - RightShift", 3)
